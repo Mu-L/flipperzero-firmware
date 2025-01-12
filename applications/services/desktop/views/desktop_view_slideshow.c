@@ -3,12 +3,10 @@
 #include <gui/elements.h>
 
 #include "desktop_view_slideshow.h"
-#include "../desktop_i.h"
 #include "../helpers/slideshow.h"
-#include "../helpers/slideshow_filename.h"
 
 #define DESKTOP_SLIDESHOW_POWEROFF_SHORT 5000
-#define DESKTOP_SLIDESHOW_POWEROFF_LONG (60 * 60 * 1000)
+#define DESKTOP_SLIDESHOW_POWEROFF_LONG  (60 * 60 * 1000)
 
 struct DesktopSlideshowView {
     View* view;
@@ -56,7 +54,7 @@ static bool desktop_view_slideshow_input(InputEvent* event, void* context) {
             instance->callback(DesktopSlideshowCompleted, instance->context);
         }
         update_view = true;
-    } else if(event->key == InputKeyOk) {
+    } else if(event->key == InputKeyOk && instance->timer) {
         if(event->type == InputTypePress) {
             furi_timer_start(instance->timer, DESKTOP_SLIDESHOW_POWEROFF_SHORT);
         } else if(event->type == InputTypeRelease) {
@@ -105,7 +103,7 @@ static void desktop_view_slideshow_exit(void* context) {
     view_commit_model(instance->view, false);
 }
 
-DesktopSlideshowView* desktop_view_slideshow_alloc() {
+DesktopSlideshowView* desktop_view_slideshow_alloc(void) {
     DesktopSlideshowView* instance = malloc(sizeof(DesktopSlideshowView));
     instance->view = view_alloc();
     view_allocate_model(instance->view, ViewModelTypeLocking, sizeof(DesktopSlideshowViewModel));

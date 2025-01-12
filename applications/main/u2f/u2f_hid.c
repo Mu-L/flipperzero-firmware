@@ -8,9 +8,8 @@
 #include <furi_hal_usb_hid_u2f.h>
 #include <storage/storage.h>
 
-#include <furi_hal_console.h>
+#define TAG "U2fHid"
 
-#define TAG "U2FHID"
 #define WORKER_TAG TAG "Worker"
 
 #define U2F_HID_MAX_PAYLOAD_LEN ((HID_U2F_PACKET_LEN - 7) + 128 * (HID_U2F_PACKET_LEN - 5))
@@ -19,23 +18,23 @@
 #define U2F_HID_TYPE_INIT 0x80 // Initial frame identifier
 #define U2F_HID_TYPE_CONT 0x00 // Continuation frame identifier
 
-#define U2F_HID_PING (U2F_HID_TYPE_INIT | 0x01) // Echo data through local processor only
-#define U2F_HID_MSG (U2F_HID_TYPE_INIT | 0x03) // Send U2F message frame
-#define U2F_HID_LOCK (U2F_HID_TYPE_INIT | 0x04) // Send lock channel command
-#define U2F_HID_INIT (U2F_HID_TYPE_INIT | 0x06) // Channel initialization
-#define U2F_HID_WINK (U2F_HID_TYPE_INIT | 0x08) // Send device identification wink
+#define U2F_HID_PING  (U2F_HID_TYPE_INIT | 0x01) // Echo data through local processor only
+#define U2F_HID_MSG   (U2F_HID_TYPE_INIT | 0x03) // Send U2F message frame
+#define U2F_HID_LOCK  (U2F_HID_TYPE_INIT | 0x04) // Send lock channel command
+#define U2F_HID_INIT  (U2F_HID_TYPE_INIT | 0x06) // Channel initialization
+#define U2F_HID_WINK  (U2F_HID_TYPE_INIT | 0x08) // Send device identification wink
 #define U2F_HID_ERROR (U2F_HID_TYPE_INIT | 0x3f) // Error response
 
-#define U2F_HID_ERR_NONE 0x00 // No error
-#define U2F_HID_ERR_INVALID_CMD 0x01 // Invalid command
-#define U2F_HID_ERR_INVALID_PAR 0x02 // Invalid parameter
-#define U2F_HID_ERR_INVALID_LEN 0x03 // Invalid message length
-#define U2F_HID_ERR_INVALID_SEQ 0x04 // Invalid message sequencing
-#define U2F_HID_ERR_MSG_TIMEOUT 0x05 // Message has timed out
-#define U2F_HID_ERR_CHANNEL_BUSY 0x06 // Channel busy
+#define U2F_HID_ERR_NONE          0x00 // No error
+#define U2F_HID_ERR_INVALID_CMD   0x01 // Invalid command
+#define U2F_HID_ERR_INVALID_PAR   0x02 // Invalid parameter
+#define U2F_HID_ERR_INVALID_LEN   0x03 // Invalid message length
+#define U2F_HID_ERR_INVALID_SEQ   0x04 // Invalid message sequencing
+#define U2F_HID_ERR_MSG_TIMEOUT   0x05 // Message has timed out
+#define U2F_HID_ERR_CHANNEL_BUSY  0x06 // Channel busy
 #define U2F_HID_ERR_LOCK_REQUIRED 0x0a // Command requires channel lock
-#define U2F_HID_ERR_SYNC_FAIL 0x0b // SYNC command failed
-#define U2F_HID_ERR_OTHER 0x7f // Other unspecified error
+#define U2F_HID_ERR_SYNC_FAIL     0x0b // SYNC command failed
+#define U2F_HID_ERR_OTHER         0x7f // Other unspecified error
 
 #define U2F_HID_BROADCAST_CID 0xFFFFFFFF
 
@@ -58,13 +57,13 @@ struct U2fHid_packet {
 struct U2fHid {
     FuriThread* thread;
     FuriTimer* lock_timer;
-    struct U2fHid_packet packet;
     uint8_t seq_id_last;
     uint16_t req_buf_ptr;
     uint32_t req_len_left;
     uint32_t lock_cid;
     bool lock;
     U2fData* u2f_instance;
+    struct U2fHid_packet packet;
 };
 
 static void u2f_hid_event_callback(HidU2fEvent ev, void* context) {
@@ -94,7 +93,7 @@ static void u2f_hid_send_response(U2fHid* u2f_hid) {
     uint16_t data_ptr = 0;
 
     memset(packet_buf, 0, HID_U2F_PACKET_LEN);
-    memcpy(packet_buf, &(u2f_hid->packet.cid), 4);
+    memcpy(packet_buf, &(u2f_hid->packet.cid), sizeof(uint32_t)); //-V1086
 
     // Init packet
     packet_buf[4] = u2f_hid->packet.cmd;
@@ -166,7 +165,7 @@ static bool u2f_hid_parse_request(U2fHid* u2f_hid) {
             return false;
         u2f_hid->packet.len = 17;
         uint32_t random_cid = furi_hal_random_get();
-        memcpy(&(u2f_hid->packet.payload[8]), &random_cid, 4);
+        memcpy(&(u2f_hid->packet.payload[8]), &random_cid, sizeof(uint32_t)); //-V1086
         u2f_hid->packet.payload[12] = 2; // Protocol version
         u2f_hid->packet.payload[13] = 1; // Device version major
         u2f_hid->packet.payload[14] = 0; // Device version minor
@@ -177,7 +176,7 @@ static bool u2f_hid_parse_request(U2fHid* u2f_hid) {
     } else if(u2f_hid->packet.cmd == U2F_HID_WINK) { // WINK - notify user
         if(u2f_hid->packet.len != 0) return false;
         u2f_wink(u2f_hid->u2f_instance);
-        u2f_hid->packet.len = 0;
+        u2f_hid->packet.len = 0; //-V1048
         u2f_hid_send_response(u2f_hid);
     } else
         return false;
@@ -203,7 +202,7 @@ static int32_t u2f_hid_worker(void* context) {
             WorkerEvtStop | WorkerEvtConnect | WorkerEvtDisconnect | WorkerEvtRequest,
             FuriFlagWaitAny,
             FuriWaitForever);
-        furi_check((flags & FuriFlagError) == 0);
+        furi_check(!(flags & FuriFlagError));
         if(flags & WorkerEvtStop) break;
         if(flags & WorkerEvtConnect) {
             u2f_set_state(u2f_hid->u2f_instance, 1);
@@ -215,10 +214,21 @@ static int32_t u2f_hid_worker(void* context) {
         }
         if(flags & WorkerEvtRequest) {
             uint32_t len_cur = furi_hal_hid_u2f_get_request(packet_buf);
-            if(len_cur > 0) {
+            do {
+                if(len_cur == 0) {
+                    break;
+                }
                 if((packet_buf[4] & U2F_HID_TYPE_MASK) == U2F_HID_TYPE_INIT) {
+                    if(len_cur < 7) {
+                        u2f_hid->req_len_left = 0;
+                        break; // Wrong chunk len
+                    }
                     // Init packet
                     u2f_hid->packet.len = (packet_buf[5] << 8) | (packet_buf[6]);
+                    if(u2f_hid->packet.len > U2F_HID_MAX_PAYLOAD_LEN) {
+                        u2f_hid->req_len_left = 0;
+                        break; // Wrong packet len
+                    }
                     if(u2f_hid->packet.len > (len_cur - 7)) {
                         u2f_hid->req_len_left = u2f_hid->packet.len - (len_cur - 7);
                         len_cur = len_cur - 7;
@@ -232,6 +242,10 @@ static int32_t u2f_hid_worker(void* context) {
                     u2f_hid->req_buf_ptr = len_cur;
                     if(len_cur > 0) memcpy(u2f_hid->packet.payload, &packet_buf[7], len_cur);
                 } else {
+                    if(len_cur < 5) {
+                        u2f_hid->req_len_left = 0;
+                        break; // Wrong chunk len
+                    }
                     // Continuation packet
                     if(u2f_hid->req_len_left > 0) {
                         uint32_t cid_temp = 0;
@@ -260,7 +274,7 @@ static int32_t u2f_hid_worker(void* context) {
                         u2f_hid_send_error(u2f_hid, U2F_HID_ERR_INVALID_CMD);
                     }
                 }
-            }
+            } while(0);
         }
         if(flags & WorkerEvtUnlock) {
             u2f_hid->lock = false;
@@ -282,11 +296,7 @@ U2fHid* u2f_hid_start(U2fData* u2f_inst) {
 
     u2f_hid->u2f_instance = u2f_inst;
 
-    u2f_hid->thread = furi_thread_alloc();
-    furi_thread_set_name(u2f_hid->thread, "U2fHidWorker");
-    furi_thread_set_stack_size(u2f_hid->thread, 2048);
-    furi_thread_set_context(u2f_hid->thread, u2f_hid);
-    furi_thread_set_callback(u2f_hid->thread, u2f_hid_worker);
+    u2f_hid->thread = furi_thread_alloc_ex("U2fHidWorker", 2048, u2f_hid_worker, u2f_hid);
     furi_thread_start(u2f_hid->thread);
     return u2f_hid;
 }

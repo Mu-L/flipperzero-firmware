@@ -1,5 +1,4 @@
 #include "buffer_stream.h"
-#include <stream_buffer.h>
 
 struct Buffer {
     volatile bool occupied;
@@ -10,11 +9,11 @@ struct Buffer {
 
 struct BufferStream {
     size_t stream_overrun_count;
-    StreamBufferHandle_t stream;
+    FuriStreamBuffer* stream;
 
     size_t index;
-    Buffer* buffers;
     size_t max_buffers_count;
+    Buffer buffers[];
 };
 
 bool buffer_write(Buffer* buffer, const uint8_t* data, size_t size) {
@@ -45,16 +44,15 @@ void buffer_reset(Buffer* buffer) {
 BufferStream* buffer_stream_alloc(size_t buffer_size, size_t buffers_count) {
     furi_assert(buffer_size > 0);
     furi_assert(buffers_count > 0);
-    BufferStream* buffer_stream = malloc(sizeof(BufferStream));
+    BufferStream* buffer_stream = malloc(sizeof(BufferStream) + (sizeof(Buffer) * buffers_count));
     buffer_stream->max_buffers_count = buffers_count;
-    buffer_stream->buffers = malloc(sizeof(Buffer) * buffer_stream->max_buffers_count);
     for(size_t i = 0; i < buffer_stream->max_buffers_count; i++) {
         buffer_stream->buffers[i].occupied = false;
         buffer_stream->buffers[i].size = 0;
         buffer_stream->buffers[i].data = malloc(buffer_size);
         buffer_stream->buffers[i].max_data_size = buffer_size;
     }
-    buffer_stream->stream = xStreamBufferCreate(
+    buffer_stream->stream = furi_stream_buffer_alloc(
         sizeof(BufferStream*) * buffer_stream->max_buffers_count, sizeof(BufferStream*));
     buffer_stream->stream_overrun_count = 0;
     buffer_stream->index = 0;
@@ -66,8 +64,7 @@ void buffer_stream_free(BufferStream* buffer_stream) {
     for(size_t i = 0; i < buffer_stream->max_buffers_count; i++) {
         free(buffer_stream->buffers[i].data);
     }
-    vStreamBufferDelete(buffer_stream->stream);
-    free(buffer_stream->buffers);
+    furi_stream_buffer_free(buffer_stream->stream);
     free(buffer_stream);
 }
 
@@ -83,11 +80,7 @@ static inline int8_t buffer_stream_get_free_buffer(BufferStream* buffer_stream) 
     return id;
 }
 
-bool buffer_stream_send_from_isr(
-    BufferStream* buffer_stream,
-    const uint8_t* data,
-    size_t size,
-    BaseType_t* const task_woken) {
+bool buffer_stream_send_from_isr(BufferStream* buffer_stream, const uint8_t* data, size_t size) {
     Buffer* buffer = &buffer_stream->buffers[buffer_stream->index];
     bool result = true;
 
@@ -96,7 +89,7 @@ bool buffer_stream_send_from_isr(
         // if buffer is full - send it
         buffer->occupied = true;
         // we always have space for buffer in stream
-        xStreamBufferSendFromISR(buffer_stream->stream, &buffer, sizeof(Buffer*), task_woken);
+        furi_stream_buffer_send(buffer_stream->stream, &buffer, sizeof(Buffer*), 0);
 
         // get new buffer from the pool
         int8_t index = buffer_stream_get_free_buffer(buffer_stream);
@@ -117,9 +110,10 @@ bool buffer_stream_send_from_isr(
     return result;
 }
 
-Buffer* buffer_stream_receive(BufferStream* buffer_stream, TickType_t timeout) {
+Buffer* buffer_stream_receive(BufferStream* buffer_stream, uint32_t timeout) {
     Buffer* buffer;
-    size_t size = xStreamBufferReceive(buffer_stream->stream, &buffer, sizeof(Buffer*), timeout);
+    size_t size =
+        furi_stream_buffer_receive(buffer_stream->stream, &buffer, sizeof(Buffer*), timeout);
 
     if(size == sizeof(Buffer*)) {
         return buffer;
@@ -134,9 +128,8 @@ size_t buffer_stream_get_overrun_count(BufferStream* buffer_stream) {
 
 void buffer_stream_reset(BufferStream* buffer_stream) {
     FURI_CRITICAL_ENTER();
-    BaseType_t xReturn = xStreamBufferReset(buffer_stream->stream);
-    furi_assert(xReturn == pdPASS);
-    UNUSED(xReturn);
+    furi_stream_buffer_reset(buffer_stream->stream);
+
     buffer_stream->stream_overrun_count = 0;
     for(size_t i = 0; i < buffer_stream->max_buffers_count; i++) {
         buffer_reset(&buffer_stream->buffers[i]);

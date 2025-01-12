@@ -10,7 +10,7 @@ void ibutton_scene_write_success_on_enter(void* context) {
     iButton* ibutton = context;
     Popup* popup = ibutton->popup;
 
-    popup_set_icon(popup, 0, 12, &I_iButtonDolphinVerySuccess_108x52);
+    popup_set_icon(popup, 0, 9, &I_iButtonDolphinVerySuccess_92x55);
     popup_set_text(popup, "Successfully written!", 40, 12, AlignLeft, AlignBottom);
 
     popup_set_callback(popup, ibutton_scene_write_success_popup_callback);
@@ -43,10 +43,5 @@ void ibutton_scene_write_success_on_exit(void* context) {
     iButton* ibutton = context;
     Popup* popup = ibutton->popup;
 
-    popup_set_text(popup, NULL, 0, 0, AlignCenter, AlignTop);
-    popup_set_icon(popup, 0, 0, NULL);
-
-    popup_disable_timeout(popup);
-    popup_set_context(popup, NULL);
-    popup_set_callback(popup, NULL);
+    popup_reset(popup);
 }

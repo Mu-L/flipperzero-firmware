@@ -8,7 +8,7 @@ struct VarintPair {
     uint8_t data[VARINT_PAIR_SIZE];
 };
 
-VarintPair* varint_pair_alloc() {
+VarintPair* varint_pair_alloc(void) {
     VarintPair* pair = malloc(sizeof(VarintPair));
     pair->data_length = 0;
     return pair;
@@ -28,11 +28,9 @@ bool varint_pair_pack(VarintPair* pair, bool first, uint32_t value) {
             pair->data_length = 0;
         }
     } else {
-        if(pair->data_length > 0) {
+        if(pair->data_length != 0) {
             pair->data_length += varint_uint32_pack(value, pair->data + pair->data_length);
             result = true;
-        } else {
-            pair->data_length = 0;
         }
     }
 

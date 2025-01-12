@@ -14,9 +14,12 @@
 
 #define TAG "SubGhzProtocolPrinceton"
 
+#define PRINCETON_GUARD_TIME_DEFALUT 30 //GUARD_TIME = PRINCETON_GUARD_TIME_DEFALUT * TE
+// Guard Time value should be between 15 -> 72 otherwise default value will be used
+
 static const SubGhzBlockConst subghz_protocol_princeton_const = {
-    .te_short = 400,
-    .te_long = 1200,
+    .te_short = 390,
+    .te_long = 1170,
     .te_delta = 300,
     .min_count_bit_for_found = 24,
 };
@@ -29,6 +32,7 @@ struct SubGhzProtocolDecoderPrinceton {
 
     uint32_t te;
     uint32_t last_data;
+    uint32_t guard_time;
 };
 
 struct SubGhzProtocolEncoderPrinceton {
@@ -38,6 +42,7 @@ struct SubGhzProtocolEncoderPrinceton {
     SubGhzBlockGeneric generic;
 
     uint32_t te;
+    uint32_t guard_time;
 };
 
 typedef enum {
@@ -135,45 +140,58 @@ static bool
 
     //Send Stop bit
     instance->encoder.upload[index++] = level_duration_make(true, (uint32_t)instance->te);
-    //Send PT_GUARD
-    instance->encoder.upload[index++] = level_duration_make(false, (uint32_t)instance->te * 30);
+    //Send PT_GUARD_TIME
+    instance->encoder.upload[index++] =
+        level_duration_make(false, (uint32_t)instance->te * instance->guard_time);
 
     return true;
 }
 
-bool subghz_protocol_encoder_princeton_deserialize(void* context, FlipperFormat* flipper_format) {
+SubGhzProtocolStatus
+    subghz_protocol_encoder_princeton_deserialize(void* context, FlipperFormat* flipper_format) {
     furi_assert(context);
     SubGhzProtocolEncoderPrinceton* instance = context;
-    bool res = false;
+    SubGhzProtocolStatus ret = SubGhzProtocolStatusError;
     do {
-        if(!subghz_block_generic_deserialize(&instance->generic, flipper_format)) {
-            FURI_LOG_E(TAG, "Deserialize error");
+        ret = subghz_block_generic_deserialize_check_count_bit(
+            &instance->generic,
+            flipper_format,
+            subghz_protocol_princeton_const.min_count_bit_for_found);
+        if(ret != SubGhzProtocolStatusOk) {
             break;
         }
         if(!flipper_format_rewind(flipper_format)) {
             FURI_LOG_E(TAG, "Rewind error");
+            ret = SubGhzProtocolStatusErrorParserOthers;
             break;
         }
         if(!flipper_format_read_uint32(flipper_format, "TE", (uint32_t*)&instance->te, 1)) {
             FURI_LOG_E(TAG, "Missing TE");
-            break;
-        }
-        if(instance->generic.data_count_bit !=
-           subghz_protocol_princeton_const.min_count_bit_for_found) {
-            FURI_LOG_E(TAG, "Wrong number of bits in key");
+            ret = SubGhzProtocolStatusErrorParserTe;
             break;
         }
         //optional parameter parameter
+        if(!flipper_format_read_uint32(
+               flipper_format, "Guard_time", (uint32_t*)&instance->guard_time, 1)) {
+            instance->guard_time = PRINCETON_GUARD_TIME_DEFALUT;
+        } else {
+            // Guard Time value should be between 15 -> 72 otherwise default value will be used
+            if((instance->guard_time < 15) || (instance->guard_time > 72)) {
+                instance->guard_time = PRINCETON_GUARD_TIME_DEFALUT;
+            }
+        }
+
         flipper_format_read_uint32(
             flipper_format, "Repeat", (uint32_t*)&instance->encoder.repeat, 1);
 
-        if(!subghz_protocol_encoder_princeton_get_upload(instance)) break;
+        if(!subghz_protocol_encoder_princeton_get_upload(instance)) {
+            ret = SubGhzProtocolStatusErrorEncoderGetUpload;
+            break;
+        }
         instance->encoder.is_running = true;
-
-        res = true;
     } while(false);
 
-    return res;
+    return ret;
 }
 
 void subghz_protocol_encoder_princeton_stop(void* context) {
@@ -233,6 +251,7 @@ void subghz_protocol_decoder_princeton_feed(void* context, bool level, uint32_t 
             instance->decoder.decode_data = 0;
             instance->decoder.decode_count_bit = 0;
             instance->te = 0;
+            instance->guard_time = PRINCETON_GUARD_TIME_DEFALUT;
         }
         break;
     case PrincetonDecoderStepSaveDuration:
@@ -245,8 +264,7 @@ void subghz_protocol_decoder_princeton_feed(void* context, bool level, uint32_t 
         break;
     case PrincetonDecoderStepCheckDuration:
         if(!level) {
-            if(duration >= ((uint32_t)subghz_protocol_princeton_const.te_short * 10 +
-                            subghz_protocol_princeton_const.te_delta)) {
+            if(duration >= ((uint32_t)subghz_protocol_princeton_const.te_long * 2)) {
                 instance->decoder.parser_step = PrincetonDecoderStepSaveDuration;
                 if(instance->decoder.decode_count_bit ==
                    subghz_protocol_princeton_const.min_count_bit_for_found) {
@@ -256,6 +274,11 @@ void subghz_protocol_decoder_princeton_feed(void* context, bool level, uint32_t 
 
                         instance->generic.data = instance->decoder.decode_data;
                         instance->generic.data_count_bit = instance->decoder.decode_count_bit;
+                        instance->guard_time = roundf((float)duration / instance->te);
+                        // Guard Time value should be between 15 -> 72 otherwise default value will be used
+                        if((instance->guard_time < 15) || (instance->guard_time > 72)) {
+                            instance->guard_time = PRINCETON_GUARD_TIME_DEFALUT;
+                        }
 
                         if(instance->base.callback)
                             instance->base.callback(&instance->base, instance->base.context);
@@ -309,46 +332,64 @@ uint8_t subghz_protocol_decoder_princeton_get_hash_data(void* context) {
         &instance->decoder, (instance->decoder.decode_count_bit / 8) + 1);
 }
 
-bool subghz_protocol_decoder_princeton_serialize(
+SubGhzProtocolStatus subghz_protocol_decoder_princeton_serialize(
     void* context,
     FlipperFormat* flipper_format,
-    SubGhzPresetDefinition* preset) {
+    SubGhzRadioPreset* preset) {
     furi_assert(context);
     SubGhzProtocolDecoderPrinceton* instance = context;
-    bool res = subghz_block_generic_serialize(&instance->generic, flipper_format, preset);
-    if(res && !flipper_format_write_uint32(flipper_format, "TE", &instance->te, 1)) {
+    SubGhzProtocolStatus ret =
+        subghz_block_generic_serialize(&instance->generic, flipper_format, preset);
+    if((ret == SubGhzProtocolStatusOk) &&
+       !flipper_format_write_uint32(flipper_format, "TE", &instance->te, 1)) {
         FURI_LOG_E(TAG, "Unable to add TE");
-        res = false;
+        ret = SubGhzProtocolStatusErrorParserTe;
     }
-    return res;
+    if((ret == SubGhzProtocolStatusOk) &&
+       !flipper_format_write_uint32(flipper_format, "Guard_time", &instance->guard_time, 1)) {
+        FURI_LOG_E(TAG, "Unable to add Guard_time");
+        ret = SubGhzProtocolStatusErrorParserOthers;
+    }
+
+    return ret;
 }
 
-bool subghz_protocol_decoder_princeton_deserialize(void* context, FlipperFormat* flipper_format) {
+SubGhzProtocolStatus
+    subghz_protocol_decoder_princeton_deserialize(void* context, FlipperFormat* flipper_format) {
     furi_assert(context);
     SubGhzProtocolDecoderPrinceton* instance = context;
-    bool res = false;
+    SubGhzProtocolStatus ret = SubGhzProtocolStatusError;
     do {
-        if(!subghz_block_generic_deserialize(&instance->generic, flipper_format)) {
-            FURI_LOG_E(TAG, "Deserialize error");
-            break;
-        }
-        if(instance->generic.data_count_bit !=
-           subghz_protocol_princeton_const.min_count_bit_for_found) {
-            FURI_LOG_E(TAG, "Wrong number of bits in key");
+        ret = subghz_block_generic_deserialize_check_count_bit(
+            &instance->generic,
+            flipper_format,
+            subghz_protocol_princeton_const.min_count_bit_for_found);
+        if(ret != SubGhzProtocolStatusOk) {
             break;
         }
         if(!flipper_format_rewind(flipper_format)) {
             FURI_LOG_E(TAG, "Rewind error");
+            ret = SubGhzProtocolStatusErrorParserOthers;
             break;
         }
         if(!flipper_format_read_uint32(flipper_format, "TE", (uint32_t*)&instance->te, 1)) {
             FURI_LOG_E(TAG, "Missing TE");
+            ret = SubGhzProtocolStatusErrorParserTe;
             break;
         }
-        res = true;
+        if(!flipper_format_read_uint32(
+               flipper_format, "Guard_time", (uint32_t*)&instance->guard_time, 1)) {
+            instance->guard_time = PRINCETON_GUARD_TIME_DEFALUT;
+        } else {
+            // Guard Time value should be between 15 -> 72 otherwise default value will be used
+            if((instance->guard_time < 15) || (instance->guard_time > 72)) {
+                instance->guard_time = PRINCETON_GUARD_TIME_DEFALUT;
+            }
+        }
+
     } while(false);
 
-    return res;
+    return ret;
 }
 
 void subghz_protocol_decoder_princeton_get_string(void* context, FuriString* output) {
@@ -364,12 +405,13 @@ void subghz_protocol_decoder_princeton_get_string(void* context, FuriString* out
         "Key:0x%08lX\r\n"
         "Yek:0x%08lX\r\n"
         "Sn:0x%05lX Btn:%01X\r\n"
-        "Te:%dus\r\n",
+        "Te:%luus  GT:Te*%lu\r\n",
         instance->generic.protocol_name,
         instance->generic.data_count_bit,
         (uint32_t)(instance->generic.data & 0xFFFFFF),
         data_rev,
         instance->generic.serial,
         instance->generic.btn,
-        instance->te);
+        instance->te,
+        instance->guard_time);
 }

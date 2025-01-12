@@ -1,4 +1,4 @@
-#include "../subghz_i.h"
+#include "../subghz_i.h" // IWYU pragma: keep
 #include "../helpers/subghz_custom_event.h"
 
 static const NotificationSequence subghs_sequence_sd_error = {
@@ -50,9 +50,10 @@ void subghz_scene_show_error_on_enter(void* context) {
 
 bool subghz_scene_show_error_on_event(void* context, SceneManagerEvent event) {
     SubGhz* subghz = context;
+    SubGhzCustomEvent scene_state =
+        scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneShowError);
     if(event.type == SceneManagerEventTypeBack) {
-        if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneShowError) ==
-           SubGhzCustomEventManagerSet) {
+        if(scene_state == SubGhzCustomEventManagerSet) {
             return false;
         } else {
             scene_manager_search_and_switch_to_previous_scene(
@@ -61,14 +62,12 @@ bool subghz_scene_show_error_on_event(void* context, SceneManagerEvent event) {
         return true;
     } else if(event.type == SceneManagerEventTypeCustom) {
         if(event.event == SubGhzCustomEventSceneShowErrorOk) {
-            if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneShowError) ==
-               SubGhzCustomEventManagerSet) {
+            if(scene_state == SubGhzCustomEventManagerSet) {
                 scene_manager_next_scene(subghz->scene_manager, SubGhzSceneStart);
             }
             return true;
         } else if(event.event == SubGhzCustomEventSceneShowErrorBack) {
-            if(scene_manager_get_scene_state(subghz->scene_manager, SubGhzSceneShowError) ==
-               SubGhzCustomEventManagerSet) {
+            if(scene_state == SubGhzCustomEventManagerSet) {
                 //exit app
                 if(!scene_manager_previous_scene(subghz->scene_manager)) {
                     scene_manager_stop(subghz->scene_manager);

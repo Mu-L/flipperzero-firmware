@@ -1,16 +1,21 @@
 #include <furi.h>
+#include <furi_hal.h>
+
 #include <gui/gui.h>
-#include <notification/notification.h>
-#include <notification/notification_messages.h>
 #include <gui/elements.h>
-#include <stream_buffer.h>
-#include <furi_hal_uart.h>
-#include <furi_hal_console.h>
 #include <gui/view_dispatcher.h>
 #include <gui/modules/dialog_ex.h>
 
-#define LINES_ON_SCREEN 6
+#include <lib/toolbox/strint.h>
+
+#include <notification/notification.h>
+#include <notification/notification_messages.h>
+
+#define TAG "UartEcho"
+
+#define LINES_ON_SCREEN   6
 #define COLUMNS_ON_SCREEN 21
+#define DEFAULT_BAUD_RATE 230400
 
 typedef struct UartDumpModel UartDumpModel;
 
@@ -20,7 +25,8 @@ typedef struct {
     ViewDispatcher* view_dispatcher;
     View* view;
     FuriThread* worker_thread;
-    StreamBufferHandle_t rx_stream;
+    FuriStreamBuffer* rx_stream;
+    FuriHalSerialHandle* serial_handle;
 } UartEchoApp;
 
 typedef struct {
@@ -38,10 +44,16 @@ struct UartDumpModel {
 typedef enum {
     WorkerEventReserved = (1 << 0), // Reserved for StreamBuffer internal event
     WorkerEventStop = (1 << 1),
-    WorkerEventRx = (1 << 2),
+    WorkerEventRxData = (1 << 2),
+    WorkerEventRxIdle = (1 << 3),
+    WorkerEventRxOverrunError = (1 << 4),
+    WorkerEventRxFramingError = (1 << 5),
+    WorkerEventRxNoiseError = (1 << 6),
 } WorkerEventFlags;
 
-#define WORKER_EVENTS_MASK (WorkerEventStop | WorkerEventRx)
+#define WORKER_EVENTS_MASK                                                                 \
+    (WorkerEventStop | WorkerEventRxData | WorkerEventRxIdle | WorkerEventRxOverrunError | \
+     WorkerEventRxFramingError | WorkerEventRxNoiseError)
 
 const NotificationSequence sequence_notification = {
     &message_display_backlight_on,
@@ -90,16 +102,39 @@ static uint32_t uart_echo_exit(void* context) {
     return VIEW_NONE;
 }
 
-static void uart_echo_on_irq_cb(UartIrqEvent ev, uint8_t data, void* context) {
+static void
+    uart_echo_on_irq_cb(FuriHalSerialHandle* handle, FuriHalSerialRxEvent event, void* context) {
     furi_assert(context);
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    UNUSED(handle);
     UartEchoApp* app = context;
+    volatile FuriHalSerialRxEvent event_copy = event;
+    UNUSED(event_copy);
 
-    if(ev == UartIrqEventRXNE) {
-        xStreamBufferSendFromISR(app->rx_stream, &data, 1, &xHigherPriorityTaskWoken);
-        furi_thread_flags_set(furi_thread_get_id(app->worker_thread), WorkerEventRx);
-        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    WorkerEventFlags flag = 0;
+
+    if(event & FuriHalSerialRxEventData) {
+        uint8_t data = furi_hal_serial_async_rx(handle);
+        furi_stream_buffer_send(app->rx_stream, &data, 1, 0);
+        flag |= WorkerEventRxData;
     }
+
+    if(event & FuriHalSerialRxEventIdle) {
+        //idle line detected, packet transmission may have ended
+        flag |= WorkerEventRxIdle;
+    }
+
+    //error detected
+    if(event & FuriHalSerialRxEventFrameError) {
+        flag |= WorkerEventRxFramingError;
+    }
+    if(event & FuriHalSerialRxEventNoiseError) {
+        flag |= WorkerEventRxNoiseError;
+    }
+    if(event & FuriHalSerialRxEventOverrunError) {
+        flag |= WorkerEventRxOverrunError;
+    }
+
+    furi_thread_flags_set(furi_thread_get_id(app->worker_thread), flag);
 }
 
 static void uart_echo_push_to_list(UartDumpModel* model, const char data) {
@@ -115,7 +150,7 @@ static void uart_echo_push_to_list(UartDumpModel* model, const char data) {
         bool new_string_needed = false;
         if(furi_string_size(model->list[model->line]->text) >= COLUMNS_ON_SCREEN) {
             new_string_needed = true;
-        } else if((data == '\n' || data == '\r')) {
+        } else if(data == '\n' || data == '\r') {
             // pack line breaks
             if(model->last_char != '\n' && model->last_char != '\r') {
                 new_string_needed = true;
@@ -154,39 +189,54 @@ static int32_t uart_echo_worker(void* context) {
         furi_check((events & FuriFlagError) == 0);
 
         if(events & WorkerEventStop) break;
-        if(events & WorkerEventRx) {
+        if(events & WorkerEventRxData) {
             size_t length = 0;
             do {
                 uint8_t data[64];
-                length = xStreamBufferReceive(app->rx_stream, data, 64, 0);
+                length = furi_stream_buffer_receive(app->rx_stream, data, 64, 0);
                 if(length > 0) {
-                    furi_hal_uart_tx(FuriHalUartIdUSART1, data, length);
+                    furi_hal_serial_tx(app->serial_handle, data, length);
                     with_view_model(
-                        app->view, (UartDumpModel * model) {
+                        app->view,
+                        UartDumpModel * model,
+                        {
                             for(size_t i = 0; i < length; i++) {
                                 uart_echo_push_to_list(model, data[i]);
                             }
-                            return false;
-                        });
+                        },
+                        false);
                 }
             } while(length > 0);
 
             notification_message(app->notification, &sequence_notification);
-            with_view_model(
-                app->view, (UartDumpModel * model) {
-                    UNUSED(model);
-                    return true;
-                });
+            with_view_model(app->view, UartDumpModel * model, { UNUSED(model); }, true);
+        }
+
+        if(events & WorkerEventRxIdle) {
+            furi_hal_serial_tx(app->serial_handle, (uint8_t*)"\r\nDetect IDLE\r\n", 15);
+        }
+
+        if(events &
+           (WorkerEventRxOverrunError | WorkerEventRxFramingError | WorkerEventRxNoiseError)) {
+            if(events & WorkerEventRxOverrunError) {
+                furi_hal_serial_tx(app->serial_handle, (uint8_t*)"\r\nDetect ORE\r\n", 14);
+            }
+            if(events & WorkerEventRxFramingError) {
+                furi_hal_serial_tx(app->serial_handle, (uint8_t*)"\r\nDetect FE\r\n", 13);
+            }
+            if(events & WorkerEventRxNoiseError) {
+                furi_hal_serial_tx(app->serial_handle, (uint8_t*)"\r\nDetect NE\r\n", 13);
+            }
         }
     }
 
     return 0;
 }
 
-static UartEchoApp* uart_echo_app_alloc() {
+static UartEchoApp* uart_echo_app_alloc(uint32_t baudrate) {
     UartEchoApp* app = malloc(sizeof(UartEchoApp));
 
-    app->rx_stream = xStreamBufferCreate(2048, 1);
+    app->rx_stream = furi_stream_buffer_alloc(2048, 1);
 
     // Gui
     app->gui = furi_record_open(RECORD_GUI);
@@ -194,7 +244,6 @@ static UartEchoApp* uart_echo_app_alloc() {
 
     // View dispatcher
     app->view_dispatcher = view_dispatcher_alloc();
-    view_dispatcher_enable_queue(app->view_dispatcher);
     view_dispatcher_attach_to_gui(app->view_dispatcher, app->gui, ViewDispatcherTypeFullscreen);
 
     // Views
@@ -203,31 +252,31 @@ static UartEchoApp* uart_echo_app_alloc() {
     view_set_input_callback(app->view, uart_echo_view_input_callback);
     view_allocate_model(app->view, ViewModelTypeLocking, sizeof(UartDumpModel));
     with_view_model(
-        app->view, (UartDumpModel * model) {
+        app->view,
+        UartDumpModel * model,
+        {
             for(size_t i = 0; i < LINES_ON_SCREEN; i++) {
                 model->line = 0;
                 model->escape = false;
                 model->list[i] = malloc(sizeof(ListElement));
                 model->list[i]->text = furi_string_alloc();
             }
-            return true;
-        });
+        },
+        true);
 
     view_set_previous_callback(app->view, uart_echo_exit);
     view_dispatcher_add_view(app->view_dispatcher, 0, app->view);
     view_dispatcher_switch_to_view(app->view_dispatcher, 0);
 
-    // Enable uart listener
-    furi_hal_console_disable();
-    furi_hal_uart_set_br(FuriHalUartIdUSART1, 115200);
-    furi_hal_uart_set_irq_cb(FuriHalUartIdUSART1, uart_echo_on_irq_cb, app);
-
-    app->worker_thread = furi_thread_alloc();
-    furi_thread_set_name(app->worker_thread, "UsbUartWorker");
-    furi_thread_set_stack_size(app->worker_thread, 1024);
-    furi_thread_set_context(app->worker_thread, app);
-    furi_thread_set_callback(app->worker_thread, uart_echo_worker);
+    app->worker_thread = furi_thread_alloc_ex("UsbUartWorker", 1024, uart_echo_worker, app);
     furi_thread_start(app->worker_thread);
+
+    // Enable uart listener
+    app->serial_handle = furi_hal_serial_control_acquire(FuriHalSerialIdUsart);
+    furi_check(app->serial_handle);
+    furi_hal_serial_init(app->serial_handle, baudrate);
+
+    furi_hal_serial_async_rx_start(app->serial_handle, uart_echo_on_irq_cb, app, true);
 
     return app;
 }
@@ -239,19 +288,22 @@ static void uart_echo_app_free(UartEchoApp* app) {
     furi_thread_join(app->worker_thread);
     furi_thread_free(app->worker_thread);
 
-    furi_hal_console_enable();
+    furi_hal_serial_deinit(app->serial_handle);
+    furi_hal_serial_control_release(app->serial_handle);
 
     // Free views
     view_dispatcher_remove_view(app->view_dispatcher, 0);
 
     with_view_model(
-        app->view, (UartDumpModel * model) {
+        app->view,
+        UartDumpModel * model,
+        {
             for(size_t i = 0; i < LINES_ON_SCREEN; i++) {
                 furi_string_free(model->list[i]->text);
                 free(model->list[i]);
             }
-            return true;
-        });
+        },
+        true);
     view_free(app->view);
     view_dispatcher_free(app->view_dispatcher);
 
@@ -260,15 +312,25 @@ static void uart_echo_app_free(UartEchoApp* app) {
     furi_record_close(RECORD_NOTIFICATION);
     app->gui = NULL;
 
-    vStreamBufferDelete(app->rx_stream);
+    furi_stream_buffer_free(app->rx_stream);
 
     // Free rest
     free(app);
 }
 
 int32_t uart_echo_app(void* p) {
-    UNUSED(p);
-    UartEchoApp* app = uart_echo_app_alloc();
+    uint32_t baudrate = DEFAULT_BAUD_RATE;
+    if(p) {
+        const char* baudrate_str = p;
+        if(strint_to_uint32(baudrate_str, NULL, &baudrate, 10) != StrintParseNoError) {
+            FURI_LOG_E(TAG, "Invalid baudrate: %s", baudrate_str);
+            baudrate = DEFAULT_BAUD_RATE;
+        }
+    }
+
+    FURI_LOG_I(TAG, "Using baudrate: %lu", baudrate);
+
+    UartEchoApp* app = uart_echo_app_alloc(baudrate);
     view_dispatcher_run(app->view_dispatcher);
     uart_echo_app_free(app);
     return 0;

@@ -9,9 +9,8 @@ void ibutton_scene_delete_success_on_enter(void* context) {
     iButton* ibutton = context;
     Popup* popup = ibutton->popup;
 
-    popup_set_icon(popup, 0, 2, &I_DolphinMafia_115x62);
-    popup_set_header(popup, "Deleted", 83, 19, AlignLeft, AlignBottom);
-
+    popup_set_icon(popup, 0, 2, &I_DolphinMafia_119x62);
+    popup_set_header(popup, "Deleted", 80, 19, AlignLeft, AlignBottom);
     popup_set_callback(popup, ibutton_scene_delete_success_popup_callback);
     popup_set_context(popup, ibutton);
     popup_set_timeout(popup, 1500);
@@ -39,10 +38,5 @@ void ibutton_scene_delete_success_on_exit(void* context) {
     iButton* ibutton = context;
     Popup* popup = ibutton->popup;
 
-    popup_set_text(popup, NULL, 0, 0, AlignCenter, AlignTop);
-    popup_set_icon(popup, 0, 0, NULL);
-
-    popup_disable_timeout(popup);
-    popup_set_context(popup, NULL);
-    popup_set_callback(popup, NULL);
+    popup_reset(popup);
 }

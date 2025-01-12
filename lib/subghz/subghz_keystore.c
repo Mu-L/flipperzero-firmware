@@ -13,9 +13,9 @@
 
 #define FILE_BUFFER_SIZE 64
 
-#define SUBGHZ_KEYSTORE_FILE_TYPE "Flipper SubGhz Keystore File"
+#define SUBGHZ_KEYSTORE_FILE_TYPE     "Flipper SubGhz Keystore File"
 #define SUBGHZ_KEYSTORE_FILE_RAW_TYPE "Flipper SubGhz Keystore RAW File"
-#define SUBGHZ_KEYSTORE_FILE_VERSION 0
+#define SUBGHZ_KEYSTORE_FILE_VERSION  0
 
 #define SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT 1
 #define SUBGHZ_KEYSTORE_FILE_DECRYPTED_LINE_SIZE 512
@@ -30,7 +30,7 @@ struct SubGhzKeystore {
     SubGhzKeyArray_t data;
 };
 
-SubGhzKeystore* subghz_keystore_alloc() {
+SubGhzKeystore* subghz_keystore_alloc(void) {
     SubGhzKeystore* instance = malloc(sizeof(SubGhzKeystore));
 
     SubGhzKeyArray_init(instance->data);
@@ -116,7 +116,7 @@ static bool subghz_keystore_read_file(SubGhzKeystore* instance, Stream* stream, 
 
     do {
         if(iv) {
-            if(!furi_hal_crypto_store_load_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT, iv)) {
+            if(!furi_hal_crypto_enclave_load_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT, iv)) {
                 FURI_LOG_E(TAG, "Unable to load decryption key");
                 break;
             }
@@ -175,7 +175,7 @@ static bool subghz_keystore_read_file(SubGhzKeystore* instance, Stream* stream, 
             }
         } while(ret > 0 && result);
 
-        if(iv) furi_hal_crypto_store_unload_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT);
+        if(iv) furi_hal_crypto_enclave_unload_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT);
     } while(false);
 
     free(encrypted_line);
@@ -189,7 +189,7 @@ bool subghz_keystore_load(SubGhzKeystore* instance, const char* file_name) {
     bool result = false;
     uint8_t iv[16];
     uint32_t version;
-    SubGhzKeystoreEncryption encryption;
+    uint32_t encryption;
 
     FuriString* filetype;
     filetype = furi_string_alloc();
@@ -274,7 +274,7 @@ bool subghz_keystore_save(SubGhzKeystore* instance, const char* file_name, uint8
 
         subghz_keystore_mess_with_iv(iv);
 
-        if(!furi_hal_crypto_store_load_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT, iv)) {
+        if(!furi_hal_crypto_enclave_load_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT, iv)) {
             FURI_LOG_E(TAG, "Unable to load encryption key");
             break;
         }
@@ -320,13 +320,13 @@ bool subghz_keystore_save(SubGhzKeystore* instance, const char* file_name, uint8
                 stream_write_char(stream, '\n');
                 encrypted_line_count++;
             }
-        furi_hal_crypto_store_unload_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT);
+        furi_hal_crypto_enclave_unload_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT);
         size_t total_keys = SubGhzKeyArray_size(instance->data);
         result = encrypted_line_count == total_keys;
         if(result) {
-            FURI_LOG_I(TAG, "Success. Encrypted: %d of %d", encrypted_line_count, total_keys);
+            FURI_LOG_I(TAG, "Success. Encrypted: %zu of %zu", encrypted_line_count, total_keys);
         } else {
-            FURI_LOG_E(TAG, "Failure. Encrypted: %d of %d", encrypted_line_count, total_keys);
+            FURI_LOG_E(TAG, "Failure. Encrypted: %zu of %zu", encrypted_line_count, total_keys);
         }
     } while(0);
     flipper_format_free(flipper_format);
@@ -349,9 +349,9 @@ bool subghz_keystore_raw_encrypted_save(
     uint8_t* iv) {
     bool encrypted = false;
     uint32_t version;
+    uint32_t encryption;
     FuriString* filetype;
     filetype = furi_string_alloc();
-    SubGhzKeystoreEncryption encryption;
 
     Storage* storage = furi_record_open(RECORD_STORAGE);
 
@@ -415,7 +415,7 @@ bool subghz_keystore_raw_encrypted_save(
 
         subghz_keystore_mess_with_iv(iv);
 
-        if(!furi_hal_crypto_store_load_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT, iv)) {
+        if(!furi_hal_crypto_enclave_load_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT, iv)) {
             FURI_LOG_E(TAG, "Unable to load encryption key");
             break;
         }
@@ -464,11 +464,11 @@ bool subghz_keystore_raw_encrypted_save(
             }
             stream_write_cstring(output_stream, encrypted_line);
 
-        } while(ret > 0 && result);
+        } while(true);
 
         flipper_format_free(output_flipper_format);
 
-        furi_hal_crypto_store_unload_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT);
+        furi_hal_crypto_enclave_unload_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT);
 
         if(!result) break;
 
@@ -488,7 +488,7 @@ bool subghz_keystore_raw_get_data(const char* file_name, size_t offset, uint8_t*
     bool result = false;
     uint8_t iv[16];
     uint32_t version;
-    SubGhzKeystoreEncryption encryption;
+    uint32_t encryption;
 
     FuriString* str_temp;
     str_temp = furi_string_alloc();
@@ -570,7 +570,7 @@ bool subghz_keystore_raw_get_data(const char* file_name, size_t offset, uint8_t*
             }
         }
 
-        if(!furi_hal_crypto_store_load_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT, iv)) {
+        if(!furi_hal_crypto_enclave_load_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT, iv)) {
             FURI_LOG_E(TAG, "Unable to load encryption key");
             break;
         }
@@ -598,7 +598,7 @@ bool subghz_keystore_raw_get_data(const char* file_name, size_t offset, uint8_t*
             memcpy(data, (uint8_t*)decrypted_line + (offset - (offset / 16) * 16), len);
 
         } while(0);
-        furi_hal_crypto_store_unload_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT);
+        furi_hal_crypto_enclave_unload_key(SUBGHZ_KEYSTORE_FILE_ENCRYPTION_KEY_SLOT);
         if(decrypted) result = true;
     } while(0);
     flipper_format_free(flipper_format);

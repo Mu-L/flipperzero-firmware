@@ -1,21 +1,22 @@
 #pragma once
 
+#include "../helpers/archive_files.h"
+#include "../helpers/archive_favorites.h"
+
 #include <gui/gui_i.h>
 #include <gui/view.h>
 #include <gui/canvas.h>
 #include <gui/elements.h>
-#include <furi.h>
+#include <gui/modules/file_browser_worker.h>
 #include <storage/storage.h>
-#include "../helpers/archive_files.h"
-#include "../helpers/archive_favorites.h"
-#include "gui/modules/file_browser_worker.h"
+#include <furi.h>
 
-#define MAX_LEN_PX 110
+#define MAX_LEN_PX   110
 #define MAX_NAME_LEN 255
-#define MAX_EXT_LEN 6
+#define MAX_EXT_LEN  6
 #define FRAME_HEIGHT 12
-#define MENU_ITEMS 4u
-#define MOVE_OFFSET 5u
+#define MENU_ITEMS   4u
+#define MOVE_OFFSET  5u
 
 typedef enum {
     ArchiveTabFavorites,
@@ -26,6 +27,7 @@ typedef enum {
     ArchiveTabIButton,
     ArchiveTabBadUsb,
     ArchiveTabU2f,
+    ArchiveTabApplications,
     ArchiveTabBrowser,
     ArchiveTabTotal,
 } ArchiveTabEnum;
@@ -80,6 +82,7 @@ struct ArchiveBrowserView {
     FuriString* path;
     InputKey last_tab_switch_dir;
     bool is_root;
+    FuriTimer* scroll_timer;
 };
 
 typedef struct {
@@ -96,6 +99,9 @@ typedef struct {
     int32_t item_idx;
     int32_t array_offset;
     int32_t list_offset;
+    size_t scroll_counter;
+
+    uint32_t button_held_for_ticks;
 } ArchiveBrowserViewModel;
 
 void archive_browser_set_callback(
@@ -105,5 +111,5 @@ void archive_browser_set_callback(
 
 View* archive_browser_get_view(ArchiveBrowserView* browser);
 
-ArchiveBrowserView* browser_alloc();
+ArchiveBrowserView* browser_alloc(void);
 void browser_free(ArchiveBrowserView* browser);

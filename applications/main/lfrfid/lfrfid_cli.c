@@ -17,19 +17,22 @@
 static void lfrfid_cli(Cli* cli, FuriString* args, void* context);
 
 // app cli function
-void lfrfid_on_system_start() {
+void lfrfid_on_system_start(void) {
     Cli* cli = furi_record_open(RECORD_CLI);
     cli_add_command(cli, "rfid", CliCommandFlagDefault, lfrfid_cli, NULL);
     furi_record_close(RECORD_CLI);
 }
 
-static void lfrfid_cli_print_usage() {
+static void lfrfid_cli_print_usage(void) {
     printf("Usage:\r\n");
-    printf("rfid read <optional: normal | indala>\r\n");
-    printf("rfid <write | emulate> <key_type> <key_data>\r\n");
-    printf("rfid raw_read <ask | psk> <filename>\r\n");
-    printf("rfid raw_emulate <filename>\r\n");
-};
+    printf("rfid read <optional: normal | indala>         - read in ASK/PSK mode\r\n");
+    printf("rfid <write | emulate> <key_type> <key_data>  - write or emulate a card\r\n");
+    printf("rfid raw_read <ask | psk> <filename>          - read and save raw data to a file\r\n");
+    printf(
+        "rfid raw_emulate <filename>                   - emulate raw data (not very useful, but helps debug protocols)\r\n");
+    printf(
+        "rfid raw_analyze <filename>                   - outputs raw data to the cli and tries to decode it (useful for protocol development)\r\n");
+}
 
 typedef struct {
     ProtocolId protocol;
@@ -87,7 +90,7 @@ static void lfrfid_cli_read(Cli* cli, FuriString* args) {
         uint32_t flags =
             furi_event_flag_wait(context.event, available_flags, FuriFlagWaitAny, 100);
 
-        if(flags != FuriFlagErrorTimeout) {
+        if(flags != (unsigned)FuriFlagErrorTimeout) {
             if(FURI_BIT(flags, LFRFIDWorkerReadDone)) {
                 break;
             }
@@ -153,7 +156,7 @@ static bool lfrfid_cli_parse_args(FuriString* args, ProtocolDict* dict, Protocol
 
             for(ProtocolId i = 0; i < LFRFIDProtocolMax; i++) {
                 printf(
-                    "\t%s, %d bytes long\r\n",
+                    "\t%s, %zu bytes long\r\n",
                     protocol_dict_get_name(dict, i),
                     protocol_dict_get_data_size(dict, i));
             }
@@ -165,7 +168,7 @@ static bool lfrfid_cli_parse_args(FuriString* args, ProtocolDict* dict, Protocol
         // check data arg
         if(!args_read_hex_bytes(data_text, data, data_size)) {
             printf(
-                "%s data needs to be %d bytes long\r\n",
+                "%s data needs to be %zu bytes long\r\n",
                 protocol_dict_get_name(dict, *protocol),
                 data_size);
             break;
@@ -211,7 +214,7 @@ static void lfrfid_cli_write(Cli* cli, FuriString* args) {
 
     while(!cli_cmd_interrupt_received(cli)) {
         uint32_t flags = furi_event_flag_wait(event, available_flags, FuriFlagWaitAny, 100);
-        if(flags != FuriFlagErrorTimeout) {
+        if(flags != (unsigned)FuriFlagErrorTimeout) {
             if(FURI_BIT(flags, LFRFIDWorkerWriteOK)) {
                 printf("Written!\r\n");
                 break;
@@ -309,9 +312,9 @@ static void lfrfid_cli_raw_analyze(Cli* cli, FuriString* args) {
                     warn = true;
                 }
 
-                furi_string_printf(info_string, "[%ld %ld]", pulse, duration);
+                furi_string_printf(info_string, "[%lu %lu]", pulse, duration);
                 printf("%-16s", furi_string_get_cstr(info_string));
-                furi_string_printf(info_string, "[%ld %ld]", pulse, duration - pulse);
+                furi_string_printf(info_string, "[%lu %lu]", pulse, duration - pulse);
                 printf("%-16s", furi_string_get_cstr(info_string));
 
                 if(warn) {
@@ -335,7 +338,7 @@ static void lfrfid_cli_raw_analyze(Cli* cli, FuriString* args) {
                 total_pulse += pulse;
                 total_duration += duration;
 
-                if(total_protocol != PROTOCOL_NO) {
+                if(total_protocol != PROTOCOL_NO) { //-V1051
                     break;
                 }
             } else {
@@ -346,9 +349,9 @@ static void lfrfid_cli_raw_analyze(Cli* cli, FuriString* args) {
 
         printf("   Frequency: %f\r\n", (double)frequency);
         printf("  Duty Cycle: %f\r\n", (double)duty_cycle);
-        printf("       Warns: %ld\r\n", total_warns);
-        printf("   Pulse sum: %ld\r\n", total_pulse);
-        printf("Duration sum: %ld\r\n", total_duration);
+        printf("       Warns: %lu\r\n", total_warns);
+        printf("   Pulse sum: %lu\r\n", total_pulse);
+        printf("Duration sum: %lu\r\n", total_duration);
         printf("     Average: %f\r\n", (double)((float)total_pulse / (float)total_duration));
         printf("    Protocol: ");
 
@@ -435,7 +438,7 @@ static void lfrfid_cli_raw_read(Cli* cli, FuriString* args) {
         while(true) {
             uint32_t flags = furi_event_flag_wait(event, available_flags, FuriFlagWaitAny, 100);
 
-            if(flags != FuriFlagErrorTimeout) {
+            if(flags != (unsigned)FuriFlagErrorTimeout) {
                 if(FURI_BIT(flags, LFRFIDWorkerReadRawFileError)) {
                     printf("File is not RFID raw file\r\n");
                     break;
@@ -510,7 +513,7 @@ static void lfrfid_cli_raw_emulate(Cli* cli, FuriString* args) {
         while(true) {
             uint32_t flags = furi_event_flag_wait(event, available_flags, FuriFlagWaitAny, 100);
 
-            if(flags != FuriFlagErrorTimeout) {
+            if(flags != (unsigned)FuriFlagErrorTimeout) {
                 if(FURI_BIT(flags, LFRFIDWorkerEmulateRawFileError)) {
                     printf("File is not RFID raw file\r\n");
                     break;

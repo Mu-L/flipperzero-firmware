@@ -25,51 +25,53 @@ extern "C" {
 
 typedef enum {
     ViewOrientationHorizontal,
+    ViewOrientationHorizontalFlip,
     ViewOrientationVertical,
+    ViewOrientationVerticalFlip,
 } ViewOrientation;
 
 /** View, anonymous type */
 typedef struct View View;
 
 /** View Draw callback
- * @param      canvas,      pointer to canvas
- * @param      view_model,  pointer to context
+ * @param      canvas      pointer to canvas
+ * @param      model       pointer to model
  * @warning    called from GUI thread
  */
 typedef void (*ViewDrawCallback)(Canvas* canvas, void* model);
 
 /** View Input callback
- * @param      event,    pointer to input event data
- * @param      context,  pointer to context
+ * @param      event    pointer to input event data
+ * @param      context  pointer to context
  * @return     true if event handled, false if event ignored
  * @warning    called from GUI thread
  */
 typedef bool (*ViewInputCallback)(InputEvent* event, void* context);
 
 /** View Custom callback
- * @param      event,    number of custom event
- * @param      context,  pointer to context
+ * @param      event    number of custom event
+ * @param      context  pointer to context
  * @return     true if event handled, false if event ignored
  */
 typedef bool (*ViewCustomCallback)(uint32_t event, void* context);
 
 /** View navigation callback
- * @param      context,  pointer to context
+ * @param      context  pointer to context
  * @return     next view id
  * @warning    called from GUI thread
  */
 typedef uint32_t (*ViewNavigationCallback)(void* context);
 
 /** View callback
- * @param      context,  pointer to context
+ * @param      context  pointer to context
  * @warning    called from GUI thread
  */
 typedef void (*ViewCallback)(void* context);
 
 /** View Update Callback Called upon model change, need to be propagated to GUI
  * throw ViewPort update
- * @param      view,     pointer to view
- * @param      context,  pointer to context
+ * @param      view     pointer to view
+ * @param      context  pointer to context
  * @warning    called from GUI thread
  */
 typedef void (*ViewUpdateCallback)(View* view, void* context);
@@ -91,7 +93,7 @@ typedef enum {
 /** Allocate and init View
  * @return View instance
  */
-View* view_alloc();
+View* view_alloc(void);
 
 /** Free View
  *
@@ -211,25 +213,25 @@ void view_commit_model(View* view, bool update);
 #endif
 
 #ifdef __cplusplus
-#define with_view_model_cpp(view, type, var, function_body) \
+#define with_view_model_cpp(view, type, var, code, update)  \
     {                                                       \
-        type* p = static_cast<type*>(view_get_model(view)); \
-        bool update = [&](type * var) function_body(p);     \
+        type var = static_cast<type>(view_get_model(view)); \
+        {code};                                             \
         view_commit_model(view, update);                    \
     }
 #else
 /** With clause for view model
  *
  * @param      view           View instance pointer
- * @param      function_body  a (){} lambda declaration, executed within you
- *                            parent function context
+ * @param      type           View model type
+ * @param      code           Code block that will be executed between model lock and unlock
+ * @param      update         Bool flag, if true, view will be updated after code block. Can be variable, so code block can decide if update is needed.
  *
- * @return     true if you want to emit view update, false otherwise
  */
-#define with_view_model(view, function_body)                      \
-    {                                                             \
-        void* p = view_get_model(view);                           \
-        bool update = ({ bool __fn__ function_body __fn__; })(p); \
-        view_commit_model(view, update);                          \
+#define with_view_model(view, type, code, update) \
+    {                                             \
+        type = view_get_model(view);              \
+        {code};                                   \
+        view_commit_model(view, update);          \
     }
 #endif

@@ -17,13 +17,13 @@ struct DesktopSettingsViewPinSetupHowto {
 
 static void desktop_settings_view_pin_setup_howto_draw(Canvas* canvas, void* model) {
     furi_assert(canvas);
-    furi_assert(model);
+    UNUSED(model);
 
     canvas_draw_icon(canvas, 16, 18, &I_Pin_attention_dpad_29x29);
     elements_button_right(canvas, "Next");
 
     canvas_set_font(canvas, FontPrimary);
-    elements_multiline_text_aligned(canvas, 64, 0, AlignCenter, AlignTop, "Setting up PIN");
+    elements_multiline_text_aligned(canvas, 64, 0, AlignCenter, AlignTop, "Setting Up PIN");
 
     canvas_set_font(canvas, FontSecondary);
     elements_multiline_text(canvas, 58, 24, "Prepare to use\narrows as\nPIN symbols");
@@ -54,10 +54,9 @@ void desktop_settings_view_pin_setup_howto_set_callback(
     instance->context = context;
 }
 
-DesktopSettingsViewPinSetupHowto* desktop_settings_view_pin_setup_howto_alloc() {
+DesktopSettingsViewPinSetupHowto* desktop_settings_view_pin_setup_howto_alloc(void) {
     DesktopSettingsViewPinSetupHowto* view = malloc(sizeof(DesktopSettingsViewPinSetupHowto));
     view->view = view_alloc();
-    view_allocate_model(view->view, ViewModelTypeLockFree, 1);
     view_set_context(view->view, view);
     view_set_draw_callback(view->view, desktop_settings_view_pin_setup_howto_draw);
     view_set_input_callback(view->view, desktop_settings_view_pin_setup_howto_input);

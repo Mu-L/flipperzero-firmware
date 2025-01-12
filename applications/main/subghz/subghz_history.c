@@ -4,14 +4,16 @@
 
 #include <furi.h>
 
-#define SUBGHZ_HISTORY_MAX 50
+#define SUBGHZ_HISTORY_MAX       50
+#define SUBGHZ_HISTORY_FREE_HEAP 20480
+
 #define TAG "SubGhzHistory"
 
 typedef struct {
     FuriString* item_str;
     FlipperFormat* flipper_string;
     uint8_t type;
-    SubGhzPresetDefinition* preset;
+    SubGhzRadioPreset* preset;
 } SubGhzHistoryItem;
 
 ARRAY_DEF(SubGhzHistoryItemArray, SubGhzHistoryItem, M_POD_OPLIST)
@@ -60,7 +62,7 @@ uint32_t subghz_history_get_frequency(SubGhzHistory* instance, uint16_t idx) {
     return item->preset->frequency;
 }
 
-SubGhzPresetDefinition* subghz_history_get_preset_def(SubGhzHistory* instance, uint16_t idx) {
+SubGhzRadioPreset* subghz_history_get_radio_preset(SubGhzHistory* instance, uint16_t idx) {
     furi_assert(instance);
     SubGhzHistoryItem* item = SubGhzHistoryItemArray_get(instance->history->data, idx);
     return item->preset;
@@ -121,8 +123,12 @@ FlipperFormat* subghz_history_get_raw_data(SubGhzHistory* instance, uint16_t idx
 }
 bool subghz_history_get_text_space_left(SubGhzHistory* instance, FuriString* output) {
     furi_assert(instance);
+    if(memmgr_get_free_heap() < SUBGHZ_HISTORY_FREE_HEAP) {
+        if(output != NULL) furi_string_printf(output, "    Free heap LOW");
+        return true;
+    }
     if(instance->last_index_write == SUBGHZ_HISTORY_MAX) {
-        if(output != NULL) furi_string_printf(output, "Memory is FULL");
+        if(output != NULL) furi_string_printf(output, "   Memory is FULL");
         return true;
     }
     if(output != NULL)
@@ -138,10 +144,11 @@ void subghz_history_get_text_item_menu(SubGhzHistory* instance, FuriString* outp
 bool subghz_history_add_to_history(
     SubGhzHistory* instance,
     void* context,
-    SubGhzPresetDefinition* preset) {
+    SubGhzRadioPreset* preset) {
     furi_assert(instance);
     furi_assert(context);
 
+    if(memmgr_get_free_heap() < SUBGHZ_HISTORY_FREE_HEAP) return false;
     if(instance->last_index_write >= SUBGHZ_HISTORY_MAX) return false;
 
     SubGhzProtocolDecoderBase* decoder_base = context;
@@ -158,7 +165,7 @@ bool subghz_history_add_to_history(
     FuriString* text;
     text = furi_string_alloc();
     SubGhzHistoryItem* item = SubGhzHistoryItemArray_push_raw(instance->history->data);
-    item->preset = malloc(sizeof(SubGhzPresetDefinition));
+    item->preset = malloc(sizeof(SubGhzRadioPreset));
     item->type = decoder_base->protocol->type;
     item->preset->frequency = preset->frequency;
     item->preset->name = furi_string_alloc();
@@ -200,27 +207,31 @@ bool subghz_history_add_to_history(
         }
         uint8_t key_data[sizeof(uint64_t)] = {0};
         if(!flipper_format_read_hex(item->flipper_string, "Key", key_data, sizeof(uint64_t))) {
-            FURI_LOG_E(TAG, "Missing Key");
-            break;
+            FURI_LOG_D(TAG, "No Key");
         }
         uint64_t data = 0;
         for(uint8_t i = 0; i < sizeof(uint64_t); i++) {
             data = (data << 8) | key_data[i];
         }
-        if(!(uint32_t)(data >> 32)) {
-            furi_string_printf(
-                item->item_str,
-                "%s %lX",
-                furi_string_get_cstr(instance->tmp_string),
-                (uint32_t)(data & 0xFFFFFFFF));
+        if(data != 0) {
+            if(!(uint32_t)(data >> 32)) {
+                furi_string_printf(
+                    item->item_str,
+                    "%s %lX",
+                    furi_string_get_cstr(instance->tmp_string),
+                    (uint32_t)(data & 0xFFFFFFFF));
+            } else {
+                furi_string_printf(
+                    item->item_str,
+                    "%s %lX%08lX",
+                    furi_string_get_cstr(instance->tmp_string),
+                    (uint32_t)(data >> 32),
+                    (uint32_t)(data & 0xFFFFFFFF));
+            }
         } else {
-            furi_string_printf(
-                item->item_str,
-                "%s %lX%08lX",
-                furi_string_get_cstr(instance->tmp_string),
-                (uint32_t)(data >> 32),
-                (uint32_t)(data & 0xFFFFFFFF));
+            furi_string_printf(item->item_str, "%s", furi_string_get_cstr(instance->tmp_string));
         }
+
     } while(false);
 
     furi_string_free(text);

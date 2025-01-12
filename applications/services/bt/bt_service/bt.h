@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <furi_ble/profile_interface.h>
+#include <core/common_defines.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -18,22 +20,30 @@ typedef enum {
     BtStatusConnected,
 } BtStatus;
 
-typedef enum {
-    BtProfileSerial,
-    BtProfileHidKeyboard,
-} BtProfile;
-
 typedef void (*BtStatusChangedCallback)(BtStatus status, void* context);
 
 /** Change BLE Profile
  * @note Call of this function leads to 2nd core restart
  *
- * @param bt        Bt instance
- * @param profile   BtProfile
+ * @param bt                 Bt instance
+ * @param profile_template   Profile template to change to
+ * @param params             Profile parameters. Can be NULL
  *
  * @return          true on success
  */
-bool bt_set_profile(Bt* bt, BtProfile profile);
+FURI_WARN_UNUSED FuriHalBleProfileBase* bt_profile_start(
+    Bt* bt,
+    const FuriHalBleProfileTemplate* profile_template,
+    FuriHalBleProfileParams params);
+
+/** Stop current BLE Profile and restore default profile
+ * @note Call of this function leads to 2nd core restart
+ *
+ * @param bt        Bt instance
+ *
+ * @return          true on success
+ */
+bool bt_profile_restore_default(Bt* bt);
 
 /** Disconnect from Central
  *
@@ -55,6 +65,19 @@ void bt_set_status_changed_callback(Bt* bt, BtStatusChangedCallback callback, vo
  * @param bt        Bt instance
  */
 void bt_forget_bonded_devices(Bt* bt);
+
+/** Set keys storage file path
+ *
+ * @param bt                    Bt instance
+ * @param keys_storage_path     Path to file with saved keys
+ */
+void bt_keys_storage_set_storage_path(Bt* bt, const char* keys_storage_path);
+
+/** Set default keys storage file path
+ *
+ * @param bt                    Bt instance
+ */
+void bt_keys_storage_set_default_path(Bt* bt);
 
 #ifdef __cplusplus
 }

@@ -1,5 +1,5 @@
 #include "gpio_test.h"
-#include "../gpio_item.h"
+#include "../gpio_items.h"
 
 #include <gui/elements.h>
 
@@ -11,6 +11,7 @@ struct GpioTest {
 
 typedef struct {
     uint8_t pin_idx;
+    GPIOItems* gpio_items;
 } GpioTestModel;
 
 static bool gpio_test_process_left(GpioTest* gpio_test);
@@ -25,7 +26,12 @@ static void gpio_test_draw_callback(Canvas* canvas, void* _model) {
     elements_multiline_text_aligned(
         canvas, 64, 16, AlignCenter, AlignTop, "Press < or > to change pin");
     elements_multiline_text_aligned(
-        canvas, 64, 32, AlignCenter, AlignTop, gpio_item_get_pin_name(model->pin_idx));
+        canvas,
+        64,
+        32,
+        AlignCenter,
+        AlignTop,
+        gpio_items_get_pin_name(model->gpio_items, model->pin_idx));
 }
 
 static bool gpio_test_input_callback(InputEvent* event, void* context) {
@@ -48,23 +54,27 @@ static bool gpio_test_input_callback(InputEvent* event, void* context) {
 
 static bool gpio_test_process_left(GpioTest* gpio_test) {
     with_view_model(
-        gpio_test->view, (GpioTestModel * model) {
+        gpio_test->view,
+        GpioTestModel * model,
+        {
             if(model->pin_idx) {
                 model->pin_idx--;
             }
-            return true;
-        });
+        },
+        true);
     return true;
 }
 
 static bool gpio_test_process_right(GpioTest* gpio_test) {
     with_view_model(
-        gpio_test->view, (GpioTestModel * model) {
-            if(model->pin_idx < GPIO_ITEM_COUNT) {
+        gpio_test->view,
+        GpioTestModel * model,
+        {
+            if(model->pin_idx < gpio_items_get_count(model->gpio_items)) {
                 model->pin_idx++;
             }
-            return true;
-        });
+        },
+        true);
     return true;
 }
 
@@ -72,34 +82,40 @@ static bool gpio_test_process_ok(GpioTest* gpio_test, InputEvent* event) {
     bool consumed = false;
 
     with_view_model(
-        gpio_test->view, (GpioTestModel * model) {
+        gpio_test->view,
+        GpioTestModel * model,
+        {
             if(event->type == InputTypePress) {
-                if(model->pin_idx < GPIO_ITEM_COUNT) {
-                    gpio_item_set_pin(model->pin_idx, true);
+                if(model->pin_idx < gpio_items_get_count(model->gpio_items)) {
+                    gpio_items_set_pin(model->gpio_items, model->pin_idx, true);
                 } else {
-                    gpio_item_set_all_pins(true);
+                    gpio_items_set_all_pins(model->gpio_items, true);
                 }
                 consumed = true;
             } else if(event->type == InputTypeRelease) {
-                if(model->pin_idx < GPIO_ITEM_COUNT) {
-                    gpio_item_set_pin(model->pin_idx, false);
+                if(model->pin_idx < gpio_items_get_count(model->gpio_items)) {
+                    gpio_items_set_pin(model->gpio_items, model->pin_idx, false);
                 } else {
-                    gpio_item_set_all_pins(false);
+                    gpio_items_set_all_pins(model->gpio_items, false);
                 }
                 consumed = true;
             }
             gpio_test->callback(event->type, gpio_test->context);
-            return true;
-        });
+        },
+        true);
 
     return consumed;
 }
 
-GpioTest* gpio_test_alloc() {
+GpioTest* gpio_test_alloc(GPIOItems* gpio_items) {
     GpioTest* gpio_test = malloc(sizeof(GpioTest));
 
     gpio_test->view = view_alloc();
     view_allocate_model(gpio_test->view, ViewModelTypeLocking, sizeof(GpioTestModel));
+
+    with_view_model(
+        gpio_test->view, GpioTestModel * model, { model->gpio_items = gpio_items; }, false);
+
     view_set_context(gpio_test->view, gpio_test);
     view_set_draw_callback(gpio_test->view, gpio_test_draw_callback);
     view_set_input_callback(gpio_test->view, gpio_test_input_callback);
@@ -122,10 +138,12 @@ void gpio_test_set_ok_callback(GpioTest* gpio_test, GpioTestOkCallback callback,
     furi_assert(gpio_test);
     furi_assert(callback);
     with_view_model(
-        gpio_test->view, (GpioTestModel * model) {
+        gpio_test->view,
+        GpioTestModel * model,
+        {
             UNUSED(model);
             gpio_test->callback = callback;
             gpio_test->context = context;
-            return false;
-        });
+        },
+        false);
 }

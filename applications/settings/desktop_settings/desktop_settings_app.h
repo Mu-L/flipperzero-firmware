@@ -6,6 +6,9 @@
 #include <gui/scene_manager.h>
 #include <gui/modules/submenu.h>
 #include <gui/modules/variable_item_list.h>
+#include <gui/modules/dialog_ex.h>
+#include <dialogs/dialogs.h>
+#include <assets_icons.h>
 
 #include <desktop/desktop_settings.h>
 #include <desktop/views/desktop_view_pin_input.h>
@@ -19,12 +22,14 @@ typedef enum {
     DesktopSettingsAppViewIdPinInput,
     DesktopSettingsAppViewIdPinSetupHowto,
     DesktopSettingsAppViewIdPinSetupHowto2,
+    DesktopSettingsAppViewDialogEx,
 } DesktopSettingsAppView;
 
 typedef struct {
     DesktopSettings settings;
 
     Gui* gui;
+    DialogsApp* dialogs;
     SceneManager* scene_manager;
     ViewDispatcher* view_dispatcher;
     VariableItemList* variable_item_list;
@@ -33,9 +38,12 @@ typedef struct {
     DesktopViewPinInput* pin_input_view;
     DesktopSettingsViewPinSetupHowto* pin_setup_howto_view;
     DesktopSettingsViewPinSetupHowto2* pin_setup_howto2_view;
+    DialogEx* dialog_ex;
 
-    PinCode pincode_buffer;
+    DesktopPinCode pincode_buffer;
     bool pincode_buffer_filled;
 
-    uint8_t menu_idx;
+    uint32_t pin_menu_idx;
+    uint32_t quick_apps_menu_idx;
+    uint32_t quick_apps_direction_menu_idx;
 } DesktopSettingsApp;

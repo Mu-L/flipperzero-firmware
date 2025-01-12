@@ -15,11 +15,11 @@ void ibutton_scene_retry_confirm_on_enter(void* context) {
     Widget* widget = ibutton->widget;
 
     widget_add_button_element(
-        widget, GuiButtonTypeLeft, "Exit", ibutton_scene_retry_confirm_widget_callback, ibutton);
+        widget, GuiButtonTypeLeft, "Retry", ibutton_scene_retry_confirm_widget_callback, ibutton);
     widget_add_button_element(
         widget, GuiButtonTypeRight, "Stay", ibutton_scene_retry_confirm_widget_callback, ibutton);
     widget_add_string_element(
-        widget, 64, 19, AlignCenter, AlignBottom, FontPrimary, "Return to reading?");
+        widget, 64, 19, AlignCenter, AlignBottom, FontPrimary, "Retry Reading?");
     widget_add_string_element(
         widget, 64, 29, AlignCenter, AlignBottom, FontSecondary, "All unsaved data will be lost!");
 

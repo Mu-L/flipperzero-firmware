@@ -15,7 +15,7 @@ void archive_set_file_type(ArchiveFile_t* file, const char* path, bool is_folder
     } else {
         for(size_t i = 0; i < COUNT_OF(known_ext); i++) {
             if((known_ext[i][0] == '?') || (known_ext[i][0] == '*')) continue;
-            if(furi_string_search(file->path, known_ext[i], 0) != FURI_STRING_FAILURE) {
+            if(furi_string_end_withi(file->path, known_ext[i])) {
                 if(i == ArchiveFileTypeBadUsb) {
                     if(furi_string_search(
                            file->path, archive_get_default_path(ArchiveTabBadUsb)) == 0) {
@@ -69,6 +69,7 @@ void archive_file_append(const char* path, const char* format, ...) {
         storage_file_write(file, furi_string_get_cstr(string), furi_string_size(string));
     }
 
+    furi_string_free(string);
     storage_file_close(file);
     storage_file_free(file);
     furi_record_close(RECORD_STORAGE);
@@ -91,7 +92,7 @@ void archive_delete_file(void* context, const char* format, ...) {
 
     bool res = false;
 
-    if(fileinfo.flags & FSF_DIRECTORY) {
+    if(file_info_is_dir(&fileinfo)) {
         res = storage_simply_remove_recursive(fs_api, furi_string_get_cstr(filename));
     } else {
         res = (storage_common_remove(fs_api, furi_string_get_cstr(filename)) == FSE_OK);

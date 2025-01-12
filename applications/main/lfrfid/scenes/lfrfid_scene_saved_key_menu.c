@@ -1,9 +1,11 @@
 #include "../lfrfid_i.h"
+#include <dolphin/dolphin.h>
 
 typedef enum {
     SubmenuIndexEmulate,
     SubmenuIndexWrite,
     SubmenuIndexEdit,
+    SubmenuIndexRename,
     SubmenuIndexDelete,
     SubmenuIndexInfo,
 } SubmenuIndex;
@@ -25,6 +27,8 @@ void lfrfid_scene_saved_key_menu_on_enter(void* context) {
     submenu_add_item(
         submenu, "Edit", SubmenuIndexEdit, lfrfid_scene_saved_key_menu_submenu_callback, app);
     submenu_add_item(
+        submenu, "Rename", SubmenuIndexRename, lfrfid_scene_saved_key_menu_submenu_callback, app);
+    submenu_add_item(
         submenu, "Delete", SubmenuIndexDelete, lfrfid_scene_saved_key_menu_submenu_callback, app);
     submenu_add_item(
         submenu, "Info", SubmenuIndexInfo, lfrfid_scene_saved_key_menu_submenu_callback, app);
@@ -42,12 +46,16 @@ bool lfrfid_scene_saved_key_menu_on_event(void* context, SceneManagerEvent event
     if(event.type == SceneManagerEventTypeCustom) {
         if(event.event == SubmenuIndexEmulate) {
             scene_manager_next_scene(app->scene_manager, LfRfidSceneEmulate);
+            dolphin_deed(DolphinDeedRfidEmulate);
             consumed = true;
         } else if(event.event == SubmenuIndexWrite) {
             scene_manager_next_scene(app->scene_manager, LfRfidSceneWrite);
             consumed = true;
         } else if(event.event == SubmenuIndexEdit) {
             scene_manager_next_scene(app->scene_manager, LfRfidSceneSaveData);
+            consumed = true;
+        } else if(event.event == SubmenuIndexRename) {
+            scene_manager_next_scene(app->scene_manager, LfRfidSceneSaveName);
             consumed = true;
         } else if(event.event == SubmenuIndexDelete) {
             scene_manager_next_scene(app->scene_manager, LfRfidSceneDeleteConfirm);
@@ -57,6 +65,9 @@ bool lfrfid_scene_saved_key_menu_on_event(void* context, SceneManagerEvent event
             consumed = true;
         }
         scene_manager_set_scene_state(app->scene_manager, LfRfidSceneSavedKeyMenu, event.event);
+
+    } else if(event.type == SceneManagerEventTypeBack) {
+        scene_manager_set_scene_state(app->scene_manager, LfRfidSceneSavedKeyMenu, 0);
     }
 
     return consumed;

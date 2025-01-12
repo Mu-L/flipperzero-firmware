@@ -3,7 +3,7 @@
 #include <storage/storage.h>
 #include <furi_hal.h>
 
-#define UPDATE_TASK_NOERR 0
+#define UPDATE_TASK_NOERR  0
 #define UPDATE_TASK_FAILED -1
 
 typedef struct UpdateTask {
@@ -24,3 +24,8 @@ bool update_task_open_file(UpdateTask* update_task, FuriString* filename);
 
 int32_t update_task_worker_flash_writer(void* context);
 int32_t update_task_worker_backup_restore(void* context);
+
+#define CHECK_RESULT(x) \
+    if(!(x)) {          \
+        break;          \
+    }

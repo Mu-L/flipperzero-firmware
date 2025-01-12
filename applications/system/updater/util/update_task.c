@@ -6,8 +6,9 @@
 #include <storage/storage.h>
 #include <toolbox/path.h>
 #include <update_util/dfu_file.h>
-#include <update_util/lfs_backup.h>
 #include <update_util/update_operation.h>
+
+#define TAG "UpdWorker"
 
 static const char* update_task_stage_descr[] = {
     [UpdateTaskStageProgress] = "...",
@@ -19,16 +20,215 @@ static const char* update_task_stage_descr[] = {
     [UpdateTaskStageRadioErase] = "Uninstalling radio FW",
     [UpdateTaskStageRadioWrite] = "Writing radio FW",
     [UpdateTaskStageRadioInstall] = "Installing radio FW",
-    [UpdateTaskStageRadioBusy] = "Radio is updating",
+    [UpdateTaskStageRadioBusy] = "Core 2 busy",
     [UpdateTaskStageOBValidation] = "Validating opt. bytes",
-    [UpdateTaskStageLfsBackup] = "Backing up LFS",
-    [UpdateTaskStageLfsRestore] = "Restoring LFS",
-    [UpdateTaskStageResourcesUpdate] = "Updating resources",
+    [UpdateTaskStageIntBackup] = "Backing up configuration",
+    [UpdateTaskStageIntRestore] = "Restoring configuration",
+    [UpdateTaskStageResourcesFileCleanup] = "Cleaning up files",
+    [UpdateTaskStageResourcesDirCleanup] = "Cleaning up directories",
+    [UpdateTaskStageResourcesFileUnpack] = "Extracting resources",
     [UpdateTaskStageSplashscreenInstall] = "Installing splashscreen",
     [UpdateTaskStageCompleted] = "Restarting...",
     [UpdateTaskStageError] = "Error",
     [UpdateTaskStageOBError] = "OB, report",
 };
+
+static const struct {
+    UpdateTaskStage stage;
+    uint8_t percent_min, percent_max;
+    const char* descr;
+} update_task_error_detail[] = {
+    {
+        .stage = UpdateTaskStageReadManifest,
+        .percent_min = 0,
+        .percent_max = 13,
+        .descr = "Wrong Updater HW",
+    },
+    {
+        .stage = UpdateTaskStageReadManifest,
+        .percent_min = 14,
+        .percent_max = 20,
+        .descr = "Manifest pointer error",
+    },
+    {
+        .stage = UpdateTaskStageReadManifest,
+        .percent_min = 21,
+        .percent_max = 30,
+        .descr = "Manifest load error",
+    },
+    {
+        .stage = UpdateTaskStageReadManifest,
+        .percent_min = 31,
+        .percent_max = 40,
+        .descr = "Wrong package version",
+    },
+    {
+        .stage = UpdateTaskStageReadManifest,
+        .percent_min = 41,
+        .percent_max = 50,
+        .descr = "HW Target mismatch",
+    },
+    {
+        .stage = UpdateTaskStageReadManifest,
+        .percent_min = 51,
+        .percent_max = 60,
+        .descr = "No DFU file",
+    },
+    {
+        .stage = UpdateTaskStageReadManifest,
+        .percent_min = 61,
+        .percent_max = 80,
+        .descr = "No Radio file",
+    },
+#ifndef FURI_RAM_EXEC
+    {
+        .stage = UpdateTaskStageIntBackup,
+        .percent_min = 0,
+        .percent_max = 100,
+        .descr = "FS R/W error",
+    },
+#else
+    {
+        .stage = UpdateTaskStageRadioImageValidate,
+        .percent_min = 0,
+        .percent_max = 98,
+        .descr = "FS Read error",
+    },
+    {
+        .stage = UpdateTaskStageRadioImageValidate,
+        .percent_min = 99,
+        .percent_max = 100,
+        .descr = "CRC mismatch",
+    },
+    {
+        .stage = UpdateTaskStageRadioErase,
+        .percent_min = 0,
+        .percent_max = 30,
+        .descr = "Stack remove: cmd error",
+    },
+    {
+        .stage = UpdateTaskStageRadioErase,
+        .percent_min = 31,
+        .percent_max = 100,
+        .descr = "Stack remove: wait failed",
+    },
+    {
+        .stage = UpdateTaskStageRadioWrite,
+        .percent_min = 0,
+        .percent_max = 100,
+        .descr = "Stack write: error",
+    },
+    {
+        .stage = UpdateTaskStageRadioInstall,
+        .percent_min = 0,
+        .percent_max = 10,
+        .descr = "Stack install: cmd error",
+    },
+    {
+        .stage = UpdateTaskStageRadioInstall,
+        .percent_min = 11,
+        .percent_max = 100,
+        .descr = "Stack install: wait failed",
+    },
+    {
+        .stage = UpdateTaskStageRadioBusy,
+        .percent_min = 0,
+        .percent_max = 10,
+        .descr = "Failed to start C2",
+    },
+    {
+        .stage = UpdateTaskStageRadioBusy,
+        .percent_min = 11,
+        .percent_max = 20,
+        .descr = "C2 FUS switch failed",
+    },
+    {
+        .stage = UpdateTaskStageRadioBusy,
+        .percent_min = 21,
+        .percent_max = 30,
+        .descr = "FUS operation failed",
+    },
+    {
+        .stage = UpdateTaskStageRadioBusy,
+        .percent_min = 31,
+        .percent_max = 100,
+        .descr = "C2 Stach switch failed",
+    },
+    {
+        .stage = UpdateTaskStageOBValidation,
+        .percent_min = 0,
+        .percent_max = 100,
+        .descr = "Uncorr. value mismatch",
+    },
+    {
+        .stage = UpdateTaskStageValidateDFUImage,
+        .percent_min = 0,
+        .percent_max = 1,
+        .descr = "Failed to open DFU file",
+    },
+    {
+        .stage = UpdateTaskStageValidateDFUImage,
+        .percent_min = 1,
+        .percent_max = 97,
+        .descr = "DFU file read error",
+    },
+    {
+        .stage = UpdateTaskStageValidateDFUImage,
+        .percent_min = 98,
+        .percent_max = 100,
+        .descr = "DFU file CRC mismatch",
+    },
+    {
+        .stage = UpdateTaskStageFlashWrite,
+        .percent_min = 0,
+        .percent_max = 100,
+        .descr = "Flash write error",
+    },
+    {
+        .stage = UpdateTaskStageFlashValidate,
+        .percent_min = 0,
+        .percent_max = 100,
+        .descr = "Flash compare error",
+    },
+#endif
+#ifndef FURI_RAM_EXEC
+    {
+        .stage = UpdateTaskStageIntRestore,
+        .percent_min = 0,
+        .percent_max = 100,
+        .descr = "SD card I/O error",
+    },
+    {
+        .stage = UpdateTaskStageResourcesFileCleanup,
+        .percent_min = 0,
+        .percent_max = 100,
+        .descr = "SD card I/O error",
+    },
+    {
+        .stage = UpdateTaskStageResourcesDirCleanup,
+        .percent_min = 0,
+        .percent_max = 100,
+        .descr = "SD card I/O error",
+    },
+    {
+        .stage = UpdateTaskStageResourcesFileUnpack,
+        .percent_min = 0,
+        .percent_max = 100,
+        .descr = "SD card I/O error",
+    },
+#endif
+};
+
+static const char* update_task_get_error_message(UpdateTaskStage stage, uint8_t percent) {
+    for(size_t i = 0; i < COUNT_OF(update_task_error_detail); i++) {
+        if(update_task_error_detail[i].stage == stage &&
+           percent >= update_task_error_detail[i].percent_min &&
+           percent <= update_task_error_detail[i].percent_max) {
+            return update_task_error_detail[i].descr;
+        }
+    }
+    return "Unknown error";
+}
 
 typedef struct {
     UpdateTaskStageGroup group;
@@ -36,29 +236,34 @@ typedef struct {
 } UpdateTaskStageGroupMap;
 
 #define STAGE_DEF(GROUP, WEIGHT) \
-    { .group = (GROUP), .weight = (WEIGHT), }
+    {                            \
+        .group = (GROUP),        \
+        .weight = (WEIGHT),      \
+    }
 
 static const UpdateTaskStageGroupMap update_task_stage_progress[] = {
     [UpdateTaskStageProgress] = STAGE_DEF(UpdateTaskStageGroupMisc, 0),
 
-    [UpdateTaskStageReadManifest] = STAGE_DEF(UpdateTaskStageGroupPreUpdate, 5),
-    [UpdateTaskStageLfsBackup] = STAGE_DEF(UpdateTaskStageGroupPreUpdate, 15),
+    [UpdateTaskStageReadManifest] = STAGE_DEF(UpdateTaskStageGroupPreUpdate, 45),
+    [UpdateTaskStageIntBackup] = STAGE_DEF(UpdateTaskStageGroupPreUpdate, 5),
 
     [UpdateTaskStageRadioImageValidate] = STAGE_DEF(UpdateTaskStageGroupRadio, 15),
-    [UpdateTaskStageRadioErase] = STAGE_DEF(UpdateTaskStageGroupRadio, 60),
-    [UpdateTaskStageRadioWrite] = STAGE_DEF(UpdateTaskStageGroupRadio, 80),
-    [UpdateTaskStageRadioInstall] = STAGE_DEF(UpdateTaskStageGroupRadio, 60),
-    [UpdateTaskStageRadioBusy] = STAGE_DEF(UpdateTaskStageGroupRadio, 80),
+    [UpdateTaskStageRadioErase] = STAGE_DEF(UpdateTaskStageGroupRadio, 25),
+    [UpdateTaskStageRadioWrite] = STAGE_DEF(UpdateTaskStageGroupRadio, 40),
+    [UpdateTaskStageRadioInstall] = STAGE_DEF(UpdateTaskStageGroupRadio, 30),
+    [UpdateTaskStageRadioBusy] = STAGE_DEF(UpdateTaskStageGroupRadio, 5),
 
-    [UpdateTaskStageOBValidation] = STAGE_DEF(UpdateTaskStageGroupOptionBytes, 10),
+    [UpdateTaskStageOBValidation] = STAGE_DEF(UpdateTaskStageGroupOptionBytes, 2),
 
-    [UpdateTaskStageValidateDFUImage] = STAGE_DEF(UpdateTaskStageGroupFirmware, 50),
-    [UpdateTaskStageFlashWrite] = STAGE_DEF(UpdateTaskStageGroupFirmware, 200),
-    [UpdateTaskStageFlashValidate] = STAGE_DEF(UpdateTaskStageGroupFirmware, 30),
+    [UpdateTaskStageValidateDFUImage] = STAGE_DEF(UpdateTaskStageGroupFirmware, 33),
+    [UpdateTaskStageFlashWrite] = STAGE_DEF(UpdateTaskStageGroupFirmware, 100),
+    [UpdateTaskStageFlashValidate] = STAGE_DEF(UpdateTaskStageGroupFirmware, 20),
 
-    [UpdateTaskStageLfsRestore] = STAGE_DEF(UpdateTaskStageGroupPostUpdate, 30),
+    [UpdateTaskStageIntRestore] = STAGE_DEF(UpdateTaskStageGroupPostUpdate, 5),
 
-    [UpdateTaskStageResourcesUpdate] = STAGE_DEF(UpdateTaskStageGroupResources, 255),
+    [UpdateTaskStageResourcesFileCleanup] = STAGE_DEF(UpdateTaskStageGroupResources, 100),
+    [UpdateTaskStageResourcesDirCleanup] = STAGE_DEF(UpdateTaskStageGroupResources, 50),
+    [UpdateTaskStageResourcesFileUnpack] = STAGE_DEF(UpdateTaskStageGroupResources, 255),
     [UpdateTaskStageSplashscreenInstall] = STAGE_DEF(UpdateTaskStageGroupSplashscreen, 5),
 
     [UpdateTaskStageCompleted] = STAGE_DEF(UpdateTaskStageGroupMisc, 1),
@@ -103,6 +308,7 @@ static void update_task_calc_completed_stages(UpdateTask* update_task) {
 
 void update_task_set_progress(UpdateTask* update_task, UpdateTaskStage stage, uint8_t progress) {
     if(stage != UpdateTaskStageProgress) {
+        FURI_LOG_I(TAG, "Stage %d, progress %d", stage, progress);
         /* do not override more specific error states */
         if((stage >= UpdateTaskStageError) && (update_task->state.stage >= UpdateTaskStageError)) {
             return;
@@ -111,8 +317,9 @@ void update_task_set_progress(UpdateTask* update_task, UpdateTaskStage stage, ui
         if(stage >= UpdateTaskStageError) {
             furi_string_printf(
                 update_task->state.status,
-                "%s #[%d-%d]",
-                update_task_stage_descr[stage],
+                "%s\n#[%d-%d]",
+                update_task_get_error_message(
+                    update_task->state.stage, update_task->state.stage_progress),
                 update_task->state.stage,
                 update_task->state.stage_progress);
         } else {
@@ -188,20 +395,21 @@ bool update_task_open_file(UpdateTask* update_task, FuriString* filename) {
     return open_success;
 }
 
-static void update_task_worker_thread_cb(FuriThreadState state, void* context) {
-    UpdateTask* update_task = context;
+static void
+    update_task_worker_thread_cb(FuriThread* thread, FuriThreadState state, void* context) {
+    UNUSED(context);
 
     if(state != FuriThreadStateStopped) {
         return;
     }
 
-    if(furi_thread_get_return_code(update_task->thread) == UPDATE_TASK_NOERR) {
+    if(furi_thread_get_return_code(thread) == UPDATE_TASK_NOERR) {
         furi_delay_ms(UPDATE_DELAY_OPERATION_OK);
         furi_hal_power_reset();
     }
 }
 
-UpdateTask* update_task_alloc() {
+UpdateTask* update_task_alloc(void) {
     UpdateTask* update_task = malloc(sizeof(UpdateTask));
 
     update_task->state.stage = UpdateTaskStageProgress;
@@ -216,14 +424,10 @@ UpdateTask* update_task_alloc() {
     update_task->boot_mode = furi_hal_rtc_get_boot_mode();
     update_task->update_path = furi_string_alloc();
 
-    FuriThread* thread = update_task->thread = furi_thread_alloc();
-
-    furi_thread_set_name(thread, "UpdateWorker");
-    furi_thread_set_stack_size(thread, 5120);
-    furi_thread_set_context(thread, update_task);
+    FuriThread* thread = update_task->thread =
+        furi_thread_alloc_ex("UpdateWorker", 5120, NULL, update_task);
 
     furi_thread_set_state_callback(thread, update_task_worker_thread_cb);
-    furi_thread_set_state_context(thread, update_task);
 #ifdef FURI_RAM_EXEC
     UNUSED(update_task_worker_backup_restore);
     furi_thread_set_callback(thread, update_task_worker_flash_writer);
@@ -290,7 +494,9 @@ bool update_task_parse_manifest(UpdateTask* update_task) {
         }
 
         update_task_set_progress(update_task, UpdateTaskStageProgress, 50);
-        if(manifest->target != furi_hal_version_get_hw_target()) {
+        /* Check target only if it's set - skipped for pre-production samples */
+        if(furi_hal_version_get_hw_target() &&
+           (manifest->target != furi_hal_version_get_hw_target())) {
             break;
         }
 

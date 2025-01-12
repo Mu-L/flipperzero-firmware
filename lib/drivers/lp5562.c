@@ -3,8 +3,6 @@
 #include "lp5562_reg.h"
 #include <furi_hal.h>
 
-#include <stdio.h>
-
 void lp5562_reset(FuriHalI2cBusHandle* handle) {
     Reg0D_Reset reg = {.value = 0xFF};
     furi_hal_i2c_write_reg_8(handle, LP5562_ADDRESS, 0x0D, *(uint8_t*)&reg, LP5562_I2C_TIMEOUT);
@@ -105,7 +103,7 @@ void lp5562_set_channel_src(FuriHalI2cBusHandle* handle, LP5562Channel channel, 
         reg_val &= ~(0x3 << bit_offset);
         reg_val |= ((src & 0x03) << bit_offset);
         furi_hal_i2c_write_reg_8(handle, LP5562_ADDRESS, 0x70, reg_val, LP5562_I2C_TIMEOUT);
-    } while(channel);
+    } while(channel != 0);
 }
 
 void lp5562_execute_program(
@@ -166,7 +164,7 @@ void lp5562_stop_program(FuriHalI2cBusHandle* handle, LP5562Engine eng) {
     bit_offset = (3 - eng) * 2;
     furi_hal_i2c_read_reg_8(handle, LP5562_ADDRESS, 0x01, &reg_val, LP5562_I2C_TIMEOUT);
     reg_val &= ~(0x3 << bit_offset);
-    reg_val |= (0x00 << bit_offset); // Disabled
+    // Not setting lowest 2 bits here
     furi_hal_i2c_write_reg_8(handle, LP5562_ADDRESS, 0x01, reg_val, LP5562_I2C_TIMEOUT);
 }
 

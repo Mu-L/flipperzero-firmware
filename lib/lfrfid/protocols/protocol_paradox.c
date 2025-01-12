@@ -2,17 +2,17 @@
 #include <toolbox/protocols/protocol.h>
 #include <lfrfid/tools/fsk_demod.h>
 #include <lfrfid/tools/fsk_osc.h>
-#include <lfrfid/tools/bit_lib.h>
+#include <bit_lib/bit_lib.h>
 #include "lfrfid_protocols.h"
 
 #define JITTER_TIME (20)
-#define MIN_TIME (64 - JITTER_TIME)
-#define MAX_TIME (80 + JITTER_TIME)
+#define MIN_TIME    (64 - JITTER_TIME)
+#define MAX_TIME    (80 + JITTER_TIME)
 
 #define PARADOX_DECODED_DATA_SIZE (6)
 
-#define PARADOX_PREAMBLE_LENGTH (8)
-#define PARADOX_ENCODED_BIT_SIZE (96)
+#define PARADOX_PREAMBLE_LENGTH   (8)
+#define PARADOX_ENCODED_BIT_SIZE  (96)
 #define PARADOX_ENCODED_DATA_SIZE (((PARADOX_ENCODED_BIT_SIZE) / 8) + 1)
 #define PARADOX_ENCODED_DATA_LAST (PARADOX_ENCODED_DATA_SIZE - 1)
 
@@ -38,21 +38,21 @@ ProtocolParadox* protocol_paradox_alloc(void) {
     protocol->encoder.fsk_osc = fsk_osc_alloc(8, 10, 50);
 
     return protocol;
-};
+}
 
 void protocol_paradox_free(ProtocolParadox* protocol) {
     fsk_demod_free(protocol->decoder.fsk_demod);
     fsk_osc_free(protocol->encoder.fsk_osc);
     free(protocol);
-};
+}
 
 uint8_t* protocol_paradox_get_data(ProtocolParadox* protocol) {
     return protocol->data;
-};
+}
 
 void protocol_paradox_decoder_start(ProtocolParadox* protocol) {
     memset(protocol->encoded_data, 0, PARADOX_ENCODED_DATA_SIZE);
-};
+}
 
 static bool protocol_paradox_can_be_decoded(ProtocolParadox* protocol) {
     // check preamble
@@ -101,7 +101,7 @@ bool protocol_paradox_decoder_feed(ProtocolParadox* protocol, bool level, uint32
     }
 
     return false;
-};
+}
 
 static void protocol_paradox_encode(const uint8_t* decoded_data, uint8_t* encoded_data) {
     // preamble
@@ -114,14 +114,14 @@ static void protocol_paradox_encode(const uint8_t* decoded_data, uint8_t* encode
             bit_lib_set_bits(encoded_data, PARADOX_PREAMBLE_LENGTH + i * 2, 0b01, 2);
         }
     }
-};
+}
 
 bool protocol_paradox_encoder_start(ProtocolParadox* protocol) {
     protocol_paradox_encode(protocol->data, (uint8_t*)protocol->encoded_data);
     protocol->encoder.encoded_index = 0;
     fsk_osc_reset(protocol->encoder.fsk_osc);
     return true;
-};
+}
 
 LevelDuration protocol_paradox_encoder_yield(ProtocolParadox* protocol) {
     bool level;
@@ -134,29 +134,73 @@ LevelDuration protocol_paradox_encoder_yield(ProtocolParadox* protocol) {
         bit_lib_increment_index(protocol->encoder.encoded_index, PARADOX_ENCODED_BIT_SIZE);
     }
     return level_duration_make(level, duration);
-};
+}
+
+static uint8_t protocol_paradox_calculate_checksum(uint8_t fc, uint16_t card_id) {
+    uint8_t card_hi = (card_id >> 8) & 0xff;
+    uint8_t card_lo = card_id & 0xff;
+
+    uint8_t arr[5] = {0, 0, fc, card_hi, card_lo};
+
+    uint8_t manchester[9];
+
+    bit_lib_push_bit(manchester, 9, false);
+    bit_lib_push_bit(manchester, 9, false);
+    bit_lib_push_bit(manchester, 9, false);
+    bit_lib_push_bit(manchester, 9, false);
+
+    for(uint8_t i = 6; i < 40; i += 1) {
+        if(bit_lib_get_bit(arr, i) == 0b1) {
+            bit_lib_push_bit(manchester, 9, true);
+            bit_lib_push_bit(manchester, 9, false);
+        } else {
+            bit_lib_push_bit(manchester, 9, false);
+            bit_lib_push_bit(manchester, 9, true);
+        }
+    }
+
+    uint8_t output = bit_lib_crc8(manchester, 9, 0x31, 0x00, true, true, 0x06);
+
+    return output;
+}
 
 void protocol_paradox_render_data(ProtocolParadox* protocol, FuriString* result) {
     uint8_t* decoded_data = protocol->data;
     uint8_t fc = bit_lib_get_bits(decoded_data, 10, 8);
     uint16_t card_id = bit_lib_get_bits_16(decoded_data, 18, 16);
+    uint8_t card_crc = bit_lib_get_bits_16(decoded_data, 34, 8);
+    uint8_t calc_crc = protocol_paradox_calculate_checksum(fc, card_id);
 
-    furi_string_cat_printf(result, "Facility: %u\r\n", fc);
-    furi_string_cat_printf(result, "Card: %lu\r\n", card_id);
-    furi_string_cat_printf(result, "Data: ");
-    for(size_t i = 0; i < PARADOX_DECODED_DATA_SIZE; i++) {
-        furi_string_cat_printf(result, "%02X", decoded_data[i]);
+    furi_string_printf(
+        result,
+        "FC: %hhu\n"
+        "Card: %hu\n"
+        "CRC: %hhu\n"
+        "Calc CRC: %hhu",
+        fc,
+        card_id,
+        card_crc,
+        calc_crc);
+
+    if(card_crc != calc_crc) {
+        furi_string_cat(result, "\nCRC Mismatch, Invalid Card!");
     }
-};
+}
 
 void protocol_paradox_render_brief_data(ProtocolParadox* protocol, FuriString* result) {
     uint8_t* decoded_data = protocol->data;
 
     uint8_t fc = bit_lib_get_bits(decoded_data, 10, 8);
     uint16_t card_id = bit_lib_get_bits_16(decoded_data, 18, 16);
+    uint8_t card_crc = bit_lib_get_bits_16(decoded_data, 34, 8);
+    uint8_t calc_crc = protocol_paradox_calculate_checksum(fc, card_id);
 
-    furi_string_cat_printf(result, "FC: %03u, Card: %05u", fc, card_id);
-};
+    furi_string_printf(result, "FC: %hhu; Card: %hu", fc, card_id);
+
+    if(calc_crc != card_crc) {
+        furi_string_cat(result, "\nCRC Mismatch, Invalid Card!");
+    }
+}
 
 bool protocol_paradox_write_data(ProtocolParadox* protocol, void* data) {
     LFRFIDWriteRequest* request = (LFRFIDWriteRequest*)data;
@@ -178,7 +222,7 @@ bool protocol_paradox_write_data(ProtocolParadox* protocol, void* data) {
         result = true;
     }
     return result;
-};
+}
 
 const ProtocolBase protocol_paradox = {
     .name = "Paradox",

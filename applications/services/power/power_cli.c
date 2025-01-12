@@ -17,31 +17,15 @@ void power_cli_off(Cli* cli, FuriString* args) {
 void power_cli_reboot(Cli* cli, FuriString* args) {
     UNUSED(cli);
     UNUSED(args);
-    power_reboot(PowerBootModeNormal);
+    Power* power = furi_record_open(RECORD_POWER);
+    power_reboot(power, PowerBootModeNormal);
 }
 
 void power_cli_reboot2dfu(Cli* cli, FuriString* args) {
     UNUSED(cli);
     UNUSED(args);
-    power_reboot(PowerBootModeDfu);
-}
-
-static void power_cli_info_callback(const char* key, const char* value, bool last, void* context) {
-    UNUSED(last);
-    UNUSED(context);
-    printf("%-24s: %s\r\n", key, value);
-}
-
-void power_cli_info(Cli* cli, FuriString* args) {
-    UNUSED(cli);
-    UNUSED(args);
-    furi_hal_power_info_get(power_cli_info_callback, NULL);
-}
-
-void power_cli_debug(Cli* cli, FuriString* args) {
-    UNUSED(cli);
-    UNUSED(args);
-    furi_hal_power_dump_state();
+    Power* power = furi_record_open(RECORD_POWER);
+    power_reboot(power, PowerBootModeDfu);
 }
 
 void power_cli_5v(Cli* cli, FuriString* args) {
@@ -66,7 +50,7 @@ void power_cli_3v3(Cli* cli, FuriString* args) {
     }
 }
 
-static void power_cli_command_print_usage() {
+static void power_cli_command_print_usage(void) {
     printf("Usage:\r\n");
     printf("power <cmd> <args>\r\n");
     printf("Cmd list:\r\n");
@@ -74,8 +58,6 @@ static void power_cli_command_print_usage() {
     printf("\toff\t - shutdown power\r\n");
     printf("\treboot\t - reboot\r\n");
     printf("\treboot2dfu\t - reboot to dfu bootloader\r\n");
-    printf("\tinfo\t - show power info\r\n");
-    printf("\tdebug\t - show debug information\r\n");
     printf("\t5v <0 or 1>\t - enable or disable 5v ext\r\n");
     if(furi_hal_rtc_is_flag_set(FuriHalRtcFlagDebug)) {
         printf("\t3v3 <0 or 1>\t - enable or disable 3v3 ext\r\n");
@@ -108,16 +90,6 @@ void power_cli(Cli* cli, FuriString* args, void* context) {
             break;
         }
 
-        if(furi_string_cmp_str(cmd, "info") == 0) {
-            power_cli_info(cli, args);
-            break;
-        }
-
-        if(furi_string_cmp_str(cmd, "debug") == 0) {
-            power_cli_debug(cli, args);
-            break;
-        }
-
         if(furi_string_cmp_str(cmd, "5v") == 0) {
             power_cli_5v(cli, args);
             break;
@@ -136,7 +108,7 @@ void power_cli(Cli* cli, FuriString* args, void* context) {
     furi_string_free(cmd);
 }
 
-void power_on_system_start() {
+void power_on_system_start(void) {
 #ifdef SRV_CLI
     Cli* cli = furi_record_open(RECORD_CLI);
 

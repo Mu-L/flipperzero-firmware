@@ -1,8 +1,9 @@
 #pragma once
 
 #include <stdint.h>
-#include <core/pubsub.h>
 #include <stdbool.h>
+
+#include <core/pubsub.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,10 +38,12 @@ typedef struct {
 typedef struct {
     bool gauge_is_ok;
     bool is_charging;
+    bool is_shutdown_requested;
 
     float current_charger;
     float current_gauge;
 
+    float voltage_battery_charge_limit;
     float voltage_charger;
     float voltage_gauge;
     float voltage_vbus;
@@ -63,7 +66,7 @@ void power_off(Power* power);
  *
  * @param mode      PowerBootMode
  */
-void power_reboot(PowerBootMode mode);
+void power_reboot(Power* power, PowerBootMode mode);
 
 /** Get power info
  *
@@ -86,7 +89,7 @@ FuriPubSub* power_get_pubsub(Power* power);
  */
 bool power_is_battery_healthy(Power* power);
 
-/** Enable or disable battery low level notification mesage
+/** Enable or disable battery low level notification message
  *
  * @param power     Power instance
  * @param enable    true - enable, false - disable

@@ -1,7 +1,7 @@
 #pragma once
 
 #include <furi.h>
-#include <bt/bt_service/bt.h>
+
 #include <gui/gui.h>
 #include <gui/view.h>
 #include <gui/view_dispatcher.h>
@@ -11,7 +11,11 @@
 #include <gui/modules/dialog_ex.h>
 #include <gui/modules/popup.h>
 
-#include <bt/bt_settings.h>
+#include <bt/bt_service/bt.h>
+#include <bt/bt_service/bt_settings_api_i.h>
+
+#include <assets_icons.h>
+
 #include "scenes/bt_settings_scene.h"
 
 enum BtSettingsCustomEvent {

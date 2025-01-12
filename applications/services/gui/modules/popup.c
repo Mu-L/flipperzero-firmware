@@ -98,7 +98,7 @@ void popup_start_timer(void* context) {
         if(timer_period == 0) timer_period = 1;
 
         if(furi_timer_start(popup->timer, timer_period) != FuriStatusOk) {
-            furi_assert(0);
+            furi_crash();
         };
     }
 }
@@ -108,23 +108,24 @@ void popup_stop_timer(void* context) {
     furi_timer_stop(popup->timer);
 }
 
-Popup* popup_alloc() {
+Popup* popup_alloc(void) {
     Popup* popup = malloc(sizeof(Popup));
     popup->view = view_alloc();
     popup->timer = furi_timer_alloc(popup_timer_callback, FuriTimerTypeOnce, popup);
-    furi_assert(popup->timer);
     popup->timer_period_in_ms = 1000;
     popup->timer_enabled = false;
 
     view_set_context(popup->view, popup);
-    view_allocate_model(popup->view, ViewModelTypeLockFree, sizeof(PopupModel));
+    view_allocate_model(popup->view, ViewModelTypeLocking, sizeof(PopupModel));
     view_set_draw_callback(popup->view, popup_view_draw_callback);
     view_set_input_callback(popup->view, popup_view_input_callback);
     view_set_enter_callback(popup->view, popup_start_timer);
     view_set_exit_callback(popup->view, popup_stop_timer);
 
     with_view_model(
-        popup->view, (PopupModel * model) {
+        popup->view,
+        PopupModel * model,
+        {
             model->header.text = NULL;
             model->header.x = 0;
             model->header.y = 0;
@@ -140,30 +141,31 @@ Popup* popup_alloc() {
             model->icon.x = 0;
             model->icon.y = 0;
             model->icon.icon = NULL;
-            return true;
-        });
+        },
+        true);
     return popup;
 }
 
 void popup_free(Popup* popup) {
-    furi_assert(popup);
+    furi_check(popup);
     furi_timer_free(popup->timer);
     view_free(popup->view);
     free(popup);
 }
 
 View* popup_get_view(Popup* popup) {
-    furi_assert(popup);
+    furi_check(popup);
+
     return popup->view;
 }
 
 void popup_set_callback(Popup* popup, PopupCallback callback) {
-    furi_assert(popup);
+    furi_check(popup);
     popup->callback = callback;
 }
 
 void popup_set_context(Popup* popup, void* context) {
-    furi_assert(popup);
+    furi_check(popup);
     popup->context = context;
 }
 
@@ -174,16 +176,19 @@ void popup_set_header(
     uint8_t y,
     Align horizontal,
     Align vertical) {
-    furi_assert(popup);
+    furi_check(popup);
+
     with_view_model(
-        popup->view, (PopupModel * model) {
+        popup->view,
+        PopupModel * model,
+        {
             model->header.text = text;
             model->header.x = x;
             model->header.y = y;
             model->header.horizontal = horizontal;
             model->header.vertical = vertical;
-            return true;
-        });
+        },
+        true);
 }
 
 void popup_set_text(
@@ -193,52 +198,64 @@ void popup_set_text(
     uint8_t y,
     Align horizontal,
     Align vertical) {
-    furi_assert(popup);
+    furi_check(popup);
+
     with_view_model(
-        popup->view, (PopupModel * model) {
+        popup->view,
+        PopupModel * model,
+        {
             model->text.text = text;
             model->text.x = x;
             model->text.y = y;
             model->text.horizontal = horizontal;
             model->text.vertical = vertical;
-            return true;
-        });
+        },
+        true);
 }
 
 void popup_set_icon(Popup* popup, uint8_t x, uint8_t y, const Icon* icon) {
-    furi_assert(popup);
+    furi_check(popup);
+
     with_view_model(
-        popup->view, (PopupModel * model) {
+        popup->view,
+        PopupModel * model,
+        {
             model->icon.x = x;
             model->icon.y = y;
             model->icon.icon = icon;
-            return true;
-        });
+        },
+        true);
 }
 
 void popup_set_timeout(Popup* popup, uint32_t timeout_in_ms) {
-    furi_assert(popup);
+    furi_check(popup);
     popup->timer_period_in_ms = timeout_in_ms;
 }
 
 void popup_enable_timeout(Popup* popup) {
+    furi_check(popup);
+
     popup->timer_enabled = true;
 }
 
 void popup_disable_timeout(Popup* popup) {
+    furi_check(popup);
+
     popup->timer_enabled = false;
 }
 
 void popup_reset(Popup* popup) {
-    furi_assert(popup);
+    furi_check(popup);
 
     with_view_model(
-        popup->view, (PopupModel * model) {
+        popup->view,
+        PopupModel * model,
+        {
             memset(&model->header, 0, sizeof(model->header));
             memset(&model->text, 0, sizeof(model->text));
             memset(&model->icon, 0, sizeof(model->icon));
-            return false;
-        });
+        },
+        false);
     popup->callback = NULL;
     popup->context = NULL;
     popup->timer_enabled = false;

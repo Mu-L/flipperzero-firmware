@@ -151,8 +151,8 @@ void subghz_protocol_decoder_scher_khan_feed(void* context, bool level, uint32_t
         break;
     case ScherKhanDecoderStepSaveDuration:
         if(level) {
-            if(duration >= (uint32_t)(subghz_protocol_scher_khan_const.te_long +
-                            subghz_protocol_scher_khan_const.te_delta * 2)) {
+            if(duration >= (subghz_protocol_scher_khan_const.te_delta * 2UL +
+                            subghz_protocol_scher_khan_const.te_long)) {
                 //Found stop bit
                 instance->decoder.parser_step = ScherKhanDecoderStepReset;
                 if(instance->decoder.decode_count_bit >=
@@ -248,16 +248,17 @@ uint8_t subghz_protocol_decoder_scher_khan_get_hash_data(void* context) {
         &instance->decoder, (instance->decoder.decode_count_bit / 8) + 1);
 }
 
-bool subghz_protocol_decoder_scher_khan_serialize(
+SubGhzProtocolStatus subghz_protocol_decoder_scher_khan_serialize(
     void* context,
     FlipperFormat* flipper_format,
-    SubGhzPresetDefinition* preset) {
+    SubGhzRadioPreset* preset) {
     furi_assert(context);
     SubGhzProtocolDecoderScherKhan* instance = context;
     return subghz_block_generic_serialize(&instance->generic, flipper_format, preset);
 }
 
-bool subghz_protocol_decoder_scher_khan_deserialize(void* context, FlipperFormat* flipper_format) {
+SubGhzProtocolStatus
+    subghz_protocol_decoder_scher_khan_deserialize(void* context, FlipperFormat* flipper_format) {
     furi_assert(context);
     SubGhzProtocolDecoderScherKhan* instance = context;
     return subghz_block_generic_deserialize(&instance->generic, flipper_format);
@@ -274,7 +275,7 @@ void subghz_protocol_decoder_scher_khan_get_string(void* context, FuriString* ou
         output,
         "%s %dbit\r\n"
         "Key:0x%lX%08lX\r\n"
-        "Sn:%07lX Btn:%lX Cnt:%04X\r\n"
+        "Sn:%07lX Btn:%X Cnt:%04lX\r\n"
         "Pt: %s\r\n",
         instance->generic.protocol_name,
         instance->generic.data_count_bit,

@@ -1,7 +1,8 @@
+#include "gpio_usb_uart.h"
 #include "../usb_uart_bridge.h"
-#include "../gpio_app_i.h"
-#include "furi_hal.h"
+#include <furi_hal.h>
 #include <gui/elements.h>
+#include <assets_icons.h>
 
 struct GpioUsbUart {
     View* view;
@@ -54,7 +55,7 @@ static void gpio_usb_uart_draw_callback(Canvas* canvas, void* _model) {
         canvas_draw_str_aligned(canvas, 116, 24, AlignRight, AlignBottom, temp_str);
     } else {
         canvas_set_font(canvas, FontSecondary);
-        canvas_draw_str_aligned(canvas, 127, 24, AlignRight, AlignBottom, "KB.");
+        canvas_draw_str_aligned(canvas, 127, 24, AlignRight, AlignBottom, "KiB.");
         canvas_set_font(canvas, FontKeyboard);
         snprintf(temp_str, 18, "%lu", model->tx_cnt / 1024);
         canvas_draw_str_aligned(canvas, 111, 24, AlignRight, AlignBottom, temp_str);
@@ -68,7 +69,7 @@ static void gpio_usb_uart_draw_callback(Canvas* canvas, void* _model) {
         canvas_draw_str_aligned(canvas, 116, 41, AlignRight, AlignBottom, temp_str);
     } else {
         canvas_set_font(canvas, FontSecondary);
-        canvas_draw_str_aligned(canvas, 127, 41, AlignRight, AlignBottom, "KB.");
+        canvas_draw_str_aligned(canvas, 127, 41, AlignRight, AlignBottom, "KiB.");
         canvas_set_font(canvas, FontKeyboard);
         snprintf(temp_str, 18, "%lu", model->rx_cnt / 1024);
         canvas_draw_str_aligned(canvas, 111, 41, AlignRight, AlignBottom, temp_str);
@@ -80,9 +81,9 @@ static void gpio_usb_uart_draw_callback(Canvas* canvas, void* _model) {
         canvas_draw_icon(canvas, 48, 14, &I_ArrowUpEmpty_14x15);
 
     if(model->rx_active)
-        canvas_draw_icon(canvas, 48, 34, &I_ArrowDownFilled_14x15);
+        canvas_draw_icon_ex(canvas, 48, 34, &I_ArrowUpFilled_14x15, IconRotation180);
     else
-        canvas_draw_icon(canvas, 48, 34, &I_ArrowDownEmpty_14x15);
+        canvas_draw_icon_ex(canvas, 48, 34, &I_ArrowUpEmpty_14x15, IconRotation180);
 }
 
 static bool gpio_usb_uart_input_callback(InputEvent* event, void* context) {
@@ -101,7 +102,7 @@ static bool gpio_usb_uart_input_callback(InputEvent* event, void* context) {
     return consumed;
 }
 
-GpioUsbUart* gpio_usb_uart_alloc() {
+GpioUsbUart* gpio_usb_uart_alloc(void) {
     GpioUsbUart* usb_uart = malloc(sizeof(GpioUsbUart));
 
     usb_uart->view = view_alloc();
@@ -129,12 +130,14 @@ void gpio_usb_uart_set_callback(GpioUsbUart* usb_uart, GpioUsbUartCallback callb
     furi_assert(callback);
 
     with_view_model(
-        usb_uart->view, (GpioUsbUartModel * model) {
+        usb_uart->view,
+        GpioUsbUartModel * model,
+        {
             UNUSED(model);
             usb_uart->callback = callback;
             usb_uart->context = context;
-            return false;
-        });
+        },
+        false);
 }
 
 void gpio_usb_uart_update_state(GpioUsbUart* instance, UsbUartConfig* cfg, UsbUartState* st) {
@@ -143,7 +146,9 @@ void gpio_usb_uart_update_state(GpioUsbUart* instance, UsbUartConfig* cfg, UsbUa
     furi_assert(st);
 
     with_view_model(
-        instance->view, (GpioUsbUartModel * model) {
+        instance->view,
+        GpioUsbUartModel * model,
+        {
             model->baudrate = st->baudrate_cur;
             model->vcp_port = cfg->vcp_ch;
             model->tx_pin = (cfg->uart_ch == 0) ? (13) : (15);
@@ -152,6 +157,6 @@ void gpio_usb_uart_update_state(GpioUsbUart* instance, UsbUartConfig* cfg, UsbUa
             model->rx_active = (model->rx_cnt != st->rx_cnt);
             model->tx_cnt = st->tx_cnt;
             model->rx_cnt = st->rx_cnt;
-            return true;
-        });
+        },
+        true);
 }

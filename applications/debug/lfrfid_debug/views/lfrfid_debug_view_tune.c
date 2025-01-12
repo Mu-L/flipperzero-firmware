@@ -13,6 +13,8 @@ typedef struct {
     uint32_t ARR;
     uint32_t CCR;
     int pos;
+    void (*update_callback)(void* context);
+    void* update_context;
 } LfRfidTuneViewModel;
 
 static void lfrfid_debug_view_tune_draw_callback(Canvas* canvas, void* _model) {
@@ -32,8 +34,8 @@ static void lfrfid_debug_view_tune_draw_callback(Canvas* canvas, void* _model) {
     canvas_set_color(canvas, ColorBlack);
 
     char buffer[TEMP_STR_LEN + 1];
-    double freq = ((float)SystemCoreClock / ((float)model->ARR + 1));
-    double duty = ((float)model->CCR + 1) / ((float)model->ARR + 1) * 100.0f;
+    double freq = ((double)SystemCoreClock / (model->ARR + 1));
+    double duty = (double)((model->CCR + 1) * 100) / (model->ARR + 1);
     snprintf(
         buffer,
         TEMP_STR_LEN,
@@ -52,23 +54,29 @@ static void lfrfid_debug_view_tune_draw_callback(Canvas* canvas, void* _model) {
 
 static void lfrfid_debug_view_tune_button_up(LfRfidTuneView* tune_view) {
     with_view_model(
-        tune_view->view, (LfRfidTuneViewModel * model) {
+        tune_view->view,
+        LfRfidTuneViewModel * model,
+        {
             if(model->pos > 0) model->pos--;
-            return true;
-        });
+        },
+        true);
 }
 
 static void lfrfid_debug_view_tune_button_down(LfRfidTuneView* tune_view) {
     with_view_model(
-        tune_view->view, (LfRfidTuneViewModel * model) {
+        tune_view->view,
+        LfRfidTuneViewModel * model,
+        {
             if(model->pos < 1) model->pos++;
-            return true;
-        });
+        },
+        true);
 }
 
 static void lfrfid_debug_view_tune_button_left(LfRfidTuneView* tune_view) {
     with_view_model(
-        tune_view->view, (LfRfidTuneViewModel * model) {
+        tune_view->view,
+        LfRfidTuneViewModel * model,
+        {
             if(model->pos == 0) {
                 if(model->fine) {
                     model->ARR -= 1;
@@ -84,13 +92,15 @@ static void lfrfid_debug_view_tune_button_left(LfRfidTuneView* tune_view) {
             }
 
             model->dirty = true;
-            return true;
-        });
+        },
+        true);
 }
 
 static void lfrfid_debug_view_tune_button_right(LfRfidTuneView* tune_view) {
     with_view_model(
-        tune_view->view, (LfRfidTuneViewModel * model) {
+        tune_view->view,
+        LfRfidTuneViewModel * model,
+        {
             if(model->pos == 0) {
                 if(model->fine) {
                     model->ARR += 1;
@@ -106,16 +116,13 @@ static void lfrfid_debug_view_tune_button_right(LfRfidTuneView* tune_view) {
             }
 
             model->dirty = true;
-            return true;
-        });
+        },
+        true);
 }
 
 static void lfrfid_debug_view_tune_button_ok(LfRfidTuneView* tune_view) {
     with_view_model(
-        tune_view->view, (LfRfidTuneViewModel * model) {
-            model->fine = !model->fine;
-            return true;
-        });
+        tune_view->view, LfRfidTuneViewModel * model, { model->fine = !model->fine; }, true);
 }
 
 static bool lfrfid_debug_view_tune_input_callback(InputEvent* event, void* context) {
@@ -146,27 +153,29 @@ static bool lfrfid_debug_view_tune_input_callback(InputEvent* event, void* conte
             consumed = false;
             break;
         }
+
+        if(event->key == InputKeyLeft || event->key == InputKeyRight) {
+            with_view_model(
+                tune_view->view,
+                LfRfidTuneViewModel * model,
+                {
+                    if(model->update_callback) {
+                        model->update_callback(model->update_context);
+                    }
+                },
+                false);
+        }
     }
 
     return consumed;
 }
 
-LfRfidTuneView* lfrfid_debug_view_tune_alloc() {
+LfRfidTuneView* lfrfid_debug_view_tune_alloc(void) {
     LfRfidTuneView* tune_view = malloc(sizeof(LfRfidTuneView));
     tune_view->view = view_alloc();
     view_set_context(tune_view->view, tune_view);
     view_allocate_model(tune_view->view, ViewModelTypeLocking, sizeof(LfRfidTuneViewModel));
-
-    with_view_model(
-        tune_view->view, (LfRfidTuneViewModel * model) {
-            model->dirty = true;
-            model->fine = false;
-            model->ARR = 511;
-            model->CCR = 255;
-            model->pos = 0;
-            return true;
-        });
-
+    lfrfid_debug_view_tune_clean(tune_view);
     view_set_draw_callback(tune_view->view, lfrfid_debug_view_tune_draw_callback);
     view_set_input_callback(tune_view->view, lfrfid_debug_view_tune_input_callback);
 
@@ -184,46 +193,58 @@ View* lfrfid_debug_view_tune_get_view(LfRfidTuneView* tune_view) {
 
 void lfrfid_debug_view_tune_clean(LfRfidTuneView* tune_view) {
     with_view_model(
-        tune_view->view, (LfRfidTuneViewModel * model) {
+        tune_view->view,
+        LfRfidTuneViewModel * model,
+        {
             model->dirty = true;
             model->fine = false;
             model->ARR = 511;
             model->CCR = 255;
             model->pos = 0;
-            return true;
-        });
+            model->update_callback = NULL;
+            model->update_context = NULL;
+        },
+        true);
 }
 
 bool lfrfid_debug_view_tune_is_dirty(LfRfidTuneView* tune_view) {
     bool result = false;
     with_view_model(
-        tune_view->view, (LfRfidTuneViewModel * model) {
+        tune_view->view,
+        LfRfidTuneViewModel * model,
+        {
             result = model->dirty;
             model->dirty = false;
-            return false;
-        });
+        },
+        false);
 
     return result;
 }
 
 uint32_t lfrfid_debug_view_tune_get_arr(LfRfidTuneView* tune_view) {
     uint32_t result = false;
-    with_view_model(
-        tune_view->view, (LfRfidTuneViewModel * model) {
-            result = model->ARR;
-            return false;
-        });
+    with_view_model(tune_view->view, LfRfidTuneViewModel * model, { result = model->ARR; }, false);
 
     return result;
 }
 
 uint32_t lfrfid_debug_view_tune_get_ccr(LfRfidTuneView* tune_view) {
     uint32_t result = false;
-    with_view_model(
-        tune_view->view, (LfRfidTuneViewModel * model) {
-            result = model->CCR;
-            return false;
-        });
+    with_view_model(tune_view->view, LfRfidTuneViewModel * model, { result = model->CCR; }, false);
 
     return result;
+}
+
+void lfrfid_debug_view_tune_set_callback(
+    LfRfidTuneView* tune_view,
+    void (*callback)(void* context),
+    void* context) {
+    with_view_model(
+        tune_view->view,
+        LfRfidTuneViewModel * model,
+        {
+            model->update_callback = callback;
+            model->update_context = context;
+        },
+        false);
 }

@@ -1,6 +1,7 @@
 #include "power_off.h"
 #include <furi.h>
 #include <gui/elements.h>
+#include <assets_icons.h>
 
 struct PowerOff {
     View* view;
@@ -25,14 +26,14 @@ static void power_off_draw_callback(Canvas* canvas, void* _model) {
 
     canvas_set_font(canvas, FontSecondary);
     if(model->response == PowerOffResponseDefault) {
-        snprintf(buff, sizeof(buff), "Charge me!\nOff in %lds!", model->time_left_sec);
+        snprintf(buff, sizeof(buff), "Charge me!\nOff in %lus!", model->time_left_sec);
         elements_multiline_text_aligned(canvas, 70, 23, AlignLeft, AlignTop, buff);
 
         elements_button_left(canvas, "Cancel");
         elements_button_center(canvas, "OK");
         elements_button_right(canvas, "Hide");
     } else {
-        snprintf(buff, sizeof(buff), "Charge me!\nDont't forget!");
+        snprintf(buff, sizeof(buff), "Charge me!\nDon't forget!");
         elements_multiline_text_aligned(canvas, 70, 23, AlignLeft, AlignTop, buff);
 
         canvas_draw_str_aligned(canvas, 64, 60, AlignCenter, AlignBottom, "Hold a second...");
@@ -61,7 +62,7 @@ static bool power_off_input_callback(InputEvent* event, void* context) {
     return true;
 }
 
-PowerOff* power_off_alloc() {
+PowerOff* power_off_alloc(void) {
     PowerOff* power_off = malloc(sizeof(PowerOff));
 
     power_off->view = view_alloc();
@@ -87,19 +88,13 @@ View* power_off_get_view(PowerOff* power_off) {
 void power_off_set_time_left(PowerOff* power_off, uint8_t time_left) {
     furi_assert(power_off);
     with_view_model(
-        power_off->view, (PowerOffModel * model) {
-            model->time_left_sec = time_left;
-            return true;
-        });
+        power_off->view, PowerOffModel * model, { model->time_left_sec = time_left; }, true);
 }
 
 PowerOffResponse power_off_get_response(PowerOff* power_off) {
     furi_assert(power_off);
     PowerOffResponse response;
     with_view_model(
-        power_off->view, (PowerOffModel * model) {
-            response = model->response;
-            return false;
-        });
+        power_off->view, PowerOffModel * model, { response = model->response; }, false);
     return response;
 }

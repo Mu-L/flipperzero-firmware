@@ -1,8 +1,13 @@
 #include <inttypes.h>
 #include <toolbox/hex.h>
+#include <toolbox/strint.h>
 #include <core/check.h>
 #include "flipper_format_stream.h"
 #include "flipper_format_stream_i.h"
+
+static inline bool flipper_format_stream_is_space(char c) {
+    return c == ' ' || c == '\t' || c == flipper_format_eolr;
+}
 
 static bool flipper_format_stream_write(Stream* stream, const void* data, size_t data_size) {
     size_t bytes_written = stream_write(stream, data, data_size);
@@ -118,55 +123,68 @@ bool flipper_format_stream_seek_to_key(Stream* stream, const char* key, bool str
 }
 
 static bool flipper_format_stream_read_value(Stream* stream, FuriString* value, bool* last) {
-    furi_string_reset(value);
+    enum {
+        LeadingSpace,
+        ReadValue,
+        TrailingSpace
+    } state = LeadingSpace;
     const size_t buffer_size = 32;
     uint8_t buffer[buffer_size];
     bool result = false;
     bool error = false;
 
+    furi_string_reset(value);
+
     while(true) {
         size_t was_read = stream_read(stream, buffer, buffer_size);
 
         if(was_read == 0) {
-            // check EOF
-            if(stream_eof(stream) && furi_string_size(value) > 0) {
+            if(state != LeadingSpace && stream_eof(stream)) {
                 result = true;
                 *last = true;
-                break;
+            } else {
+                error = true;
             }
         }
 
         for(uint16_t i = 0; i < was_read; i++) {
-            uint8_t data = buffer[i];
-            if(data == flipper_format_eoln) {
-                if(furi_string_size(value) > 0) {
-                    if(!stream_seek(stream, i - was_read, StreamOffsetFromCurrent)) {
-                        error = true;
-                        break;
-                    }
+            const uint8_t data = buffer[i];
 
-                    result = true;
-                    *last = true;
+            if(state == LeadingSpace) {
+                if(flipper_format_stream_is_space(data)) {
+                    continue;
+                } else if(data == flipper_format_eoln) {
+                    stream_seek(stream, i - was_read, StreamOffsetFromCurrent);
+                    error = true;
                     break;
                 } else {
-                    error = true;
+                    state = ReadValue;
+                    furi_string_push_back(value, data);
                 }
-            } else if(data == ' ') {
-                if(furi_string_size(value) > 0) {
+            } else if(state == ReadValue) {
+                if(flipper_format_stream_is_space(data)) {
+                    state = TrailingSpace;
+                } else if(data == flipper_format_eoln) {
                     if(!stream_seek(stream, i - was_read, StreamOffsetFromCurrent)) {
                         error = true;
-                        break;
+                    } else {
+                        result = true;
+                        *last = true;
                     }
-
-                    result = true;
-                    *last = false;
                     break;
+                } else {
+                    furi_string_push_back(value, data);
                 }
-
-            } else if(data == flipper_format_eolr) {
-                // Ignore
-            } else {
-                furi_string_push_back(value, data);
+            } else if(state == TrailingSpace) {
+                if(flipper_format_stream_is_space(data)) {
+                    continue;
+                } else if(!stream_seek(stream, i - was_read, StreamOffsetFromCurrent)) {
+                    error = true;
+                } else {
+                    *last = (data == flipper_format_eoln);
+                    result = true;
+                }
+                break;
             }
         }
 
@@ -285,7 +303,7 @@ bool flipper_format_stream_write_value_line(Stream* stream, FlipperStreamWriteDa
                 }; break;
                 case FlipperStreamValueUint32: {
                     const uint32_t* data = write_data->data;
-                    furi_string_printf(value, "%" PRId32, data[i]);
+                    furi_string_printf(value, "%" PRIu32, data[i]);
                 }; break;
                 case FlipperStreamValueHexUint64: {
                     const uint64_t* data = write_data->data;
@@ -300,7 +318,7 @@ bool flipper_format_stream_write_value_line(Stream* stream, FlipperStreamWriteDa
                     furi_crash("Unknown FF type");
                 }
 
-                if((size_t)(i + 1) < write_data->data_size) {
+                if(((size_t)i + 1) < write_data->data_size) {
                     furi_string_cat(value, " ");
                 }
 
@@ -379,11 +397,17 @@ bool flipper_format_stream_read_value_line(
 #endif
                     case FlipperStreamValueInt32: {
                         int32_t* data = _data;
-                        scan_values = sscanf(furi_string_get_cstr(value), "%" PRIi32, &data[i]);
+                        if(strint_to_int32(furi_string_get_cstr(value), NULL, &data[i], 10) ==
+                           StrintParseNoError) {
+                            scan_values = 1;
+                        }
                     }; break;
                     case FlipperStreamValueUint32: {
                         uint32_t* data = _data;
-                        scan_values = sscanf(furi_string_get_cstr(value), "%" PRId32, &data[i]);
+                        if(strint_to_uint32(furi_string_get_cstr(value), NULL, &data[i], 10) ==
+                           StrintParseNoError) {
+                            scan_values = 1;
+                        }
                     }; break;
                     case FlipperStreamValueHexUint64: {
                         uint64_t* data = _data;

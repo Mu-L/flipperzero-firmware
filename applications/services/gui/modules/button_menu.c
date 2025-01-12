@@ -1,15 +1,19 @@
 #include "button_menu.h"
-#include "gui/canvas.h"
-#include "gui/elements.h"
-#include "input/input.h"
-#include <m-array.h>
-#include <furi.h>
-#include <stdint.h>
 
-#define ITEM_FIRST_OFFSET 17
-#define ITEM_NEXT_OFFSET 4
-#define ITEM_HEIGHT 14
-#define ITEM_WIDTH 64
+#include <gui/canvas.h>
+#include <gui/elements.h>
+#include <input/input.h>
+
+#include <furi.h>
+#include <assets_icons.h>
+
+#include <stdint.h>
+#include <m-array.h>
+
+#define ITEM_FIRST_OFFSET  17
+#define ITEM_NEXT_OFFSET   4
+#define ITEM_HEIGHT        14
+#define ITEM_WIDTH         64
 #define BUTTONS_PER_SCREEN 6
 
 struct ButtonMenuItem {
@@ -29,7 +33,7 @@ struct ButtonMenu {
 
 typedef struct {
     ButtonMenuItemArray_t items;
-    uint8_t position;
+    size_t position;
     const char* header;
 } ButtonMenuModel;
 
@@ -101,11 +105,9 @@ static void button_menu_view_draw_callback(Canvas* canvas, void* _model) {
     ButtonMenuModel* model = (ButtonMenuModel*)_model;
     canvas_set_font(canvas, FontSecondary);
 
-    uint8_t item_position = 0;
-    int8_t active_screen = model->position / BUTTONS_PER_SCREEN;
-    size_t items_size = ButtonMenuItemArray_size(model->items);
-    int8_t max_screen = ((int16_t)items_size - 1) / BUTTONS_PER_SCREEN;
-    ButtonMenuItemArray_it_t it;
+    const size_t active_screen = model->position / BUTTONS_PER_SCREEN;
+    const size_t items_size = ButtonMenuItemArray_size(model->items);
+    const size_t max_screen = items_size ? (items_size - 1) / BUTTONS_PER_SCREEN : 0;
 
     if(active_screen > 0) {
         canvas_draw_icon(canvas, 28, 1, &I_InfraredArrowUp_4x8);
@@ -123,6 +125,9 @@ static void button_menu_view_draw_callback(Canvas* canvas, void* _model) {
             canvas, 32, 10, AlignCenter, AlignCenter, furi_string_get_cstr(disp_str));
         furi_string_free(disp_str);
     }
+
+    size_t item_position = 0;
+    ButtonMenuItemArray_it_t it;
 
     for(ButtonMenuItemArray_it(it, model->items); !ButtonMenuItemArray_end_p(it);
         ButtonMenuItemArray_next(it), ++item_position) {
@@ -148,28 +153,73 @@ static void button_menu_process_up(ButtonMenu* button_menu) {
     furi_assert(button_menu);
 
     with_view_model(
-        button_menu->view, (ButtonMenuModel * model) {
+        button_menu->view,
+        ButtonMenuModel * model,
+        {
             if(model->position > 0) {
                 model->position--;
             } else {
                 model->position = ButtonMenuItemArray_size(model->items) - 1;
             }
-            return true;
-        });
+        },
+        true);
 }
 
 static void button_menu_process_down(ButtonMenu* button_menu) {
     furi_assert(button_menu);
 
     with_view_model(
-        button_menu->view, (ButtonMenuModel * model) {
+        button_menu->view,
+        ButtonMenuModel * model,
+        {
             if(model->position < (ButtonMenuItemArray_size(model->items) - 1)) {
                 model->position++;
             } else {
                 model->position = 0;
             }
-            return true;
-        });
+        },
+        true);
+}
+
+static void button_menu_process_right(ButtonMenu* button_menu) {
+    furi_assert(button_menu);
+
+    with_view_model(
+        button_menu->view,
+        ButtonMenuModel * model,
+        {
+            if(ButtonMenuItemArray_size(model->items) > BUTTONS_PER_SCREEN) {
+                size_t position_candidate = model->position + BUTTONS_PER_SCREEN;
+                position_candidate -= position_candidate % BUTTONS_PER_SCREEN;
+                if(position_candidate < (ButtonMenuItemArray_size(model->items))) {
+                    model->position = position_candidate;
+                } else {
+                    model->position = 0;
+                }
+            }
+        },
+        true);
+}
+
+static void button_menu_process_left(ButtonMenu* button_menu) {
+    furi_assert(button_menu);
+
+    with_view_model(
+        button_menu->view,
+        ButtonMenuModel * model,
+        {
+            if(ButtonMenuItemArray_size(model->items) > BUTTONS_PER_SCREEN) {
+                size_t position_candidate;
+                if(model->position < BUTTONS_PER_SCREEN) {
+                    position_candidate = (ButtonMenuItemArray_size(model->items) - 1);
+                } else {
+                    position_candidate = model->position - BUTTONS_PER_SCREEN;
+                };
+                position_candidate -= position_candidate % BUTTONS_PER_SCREEN;
+                model->position = position_candidate;
+            }
+        },
+        true);
 }
 
 static void button_menu_process_ok(ButtonMenu* button_menu, InputType type) {
@@ -178,24 +228,26 @@ static void button_menu_process_ok(ButtonMenu* button_menu, InputType type) {
     ButtonMenuItem* item = NULL;
 
     with_view_model(
-        button_menu->view, (ButtonMenuModel * model) {
+        button_menu->view,
+        ButtonMenuModel * model,
+        {
             if(model->position < (ButtonMenuItemArray_size(model->items))) {
                 item = ButtonMenuItemArray_get(model->items, model->position);
             }
-            return false;
-        });
+        },
+        false);
 
     if(item) {
         if(item->type == ButtonMenuItemTypeControl) {
             if(type == InputTypeShort) {
-                if(item && item->callback) {
+                if(item->callback) {
                     item->callback(item->callback_context, item->index, type);
                 }
             }
         }
         if(item->type == ButtonMenuItemTypeCommon) {
             if((type == InputTypePress) || (type == InputTypeRelease)) {
-                if(item && item->callback) {
+                if(item->callback) {
                     item->callback(item->callback_context, item->index, type);
                 }
             }
@@ -231,6 +283,14 @@ static bool button_menu_view_input_callback(InputEvent* event, void* context) {
             consumed = true;
             button_menu_process_down(button_menu);
             break;
+        case InputKeyRight:
+            consumed = true;
+            button_menu_process_right(button_menu);
+            break;
+        case InputKeyLeft:
+            consumed = true;
+            button_menu_process_left(button_menu);
+            break;
         default:
             break;
         }
@@ -240,30 +300,28 @@ static bool button_menu_view_input_callback(InputEvent* event, void* context) {
 }
 
 View* button_menu_get_view(ButtonMenu* button_menu) {
-    furi_assert(button_menu);
+    furi_check(button_menu);
     return button_menu->view;
 }
 
 void button_menu_reset(ButtonMenu* button_menu) {
-    furi_assert(button_menu);
+    furi_check(button_menu);
 
     with_view_model(
-        button_menu->view, (ButtonMenuModel * model) {
+        button_menu->view,
+        ButtonMenuModel * model,
+        {
             ButtonMenuItemArray_reset(model->items);
             model->position = 0;
             model->header = NULL;
-            return true;
-        });
+        },
+        true);
 }
 
 void button_menu_set_header(ButtonMenu* button_menu, const char* header) {
-    furi_assert(button_menu);
+    furi_check(button_menu);
 
-    with_view_model(
-        button_menu->view, (ButtonMenuModel * model) {
-            model->header = header;
-            return true;
-        });
+    with_view_model(button_menu->view, ButtonMenuModel * model, { model->header = header; }, true);
 }
 
 ButtonMenuItem* button_menu_add_item(
@@ -274,19 +332,21 @@ ButtonMenuItem* button_menu_add_item(
     ButtonMenuItemType type,
     void* callback_context) {
     ButtonMenuItem* item = NULL;
-    furi_assert(label);
-    furi_assert(button_menu);
+    furi_check(label);
+    furi_check(button_menu);
 
     with_view_model(
-        button_menu->view, (ButtonMenuModel * model) {
+        button_menu->view,
+        ButtonMenuModel * model,
+        {
             item = ButtonMenuItemArray_push_new(model->items);
             item->label = label;
             item->index = index;
             item->type = type;
             item->callback = callback;
             item->callback_context = callback_context;
-            return true;
-        });
+        },
+        true);
 
     return item;
 }
@@ -301,35 +361,39 @@ ButtonMenu* button_menu_alloc(void) {
     view_set_input_callback(button_menu->view, button_menu_view_input_callback);
 
     with_view_model(
-        button_menu->view, (ButtonMenuModel * model) {
+        button_menu->view,
+        ButtonMenuModel * model,
+        {
             ButtonMenuItemArray_init(model->items);
             model->position = 0;
             model->header = NULL;
-            return true;
-        });
+        },
+        true);
 
     button_menu->freeze_input = false;
     return button_menu;
 }
 
 void button_menu_free(ButtonMenu* button_menu) {
-    furi_assert(button_menu);
+    furi_check(button_menu);
 
     with_view_model(
-        button_menu->view, (ButtonMenuModel * model) {
-            ButtonMenuItemArray_clear(model->items);
-            return true;
-        });
+        button_menu->view,
+        ButtonMenuModel * model,
+        { ButtonMenuItemArray_clear(model->items); },
+        true);
     view_free(button_menu->view);
     free(button_menu);
 }
 
 void button_menu_set_selected_item(ButtonMenu* button_menu, uint32_t index) {
-    furi_assert(button_menu);
+    furi_check(button_menu);
 
     with_view_model(
-        button_menu->view, (ButtonMenuModel * model) {
-            uint8_t item_position = 0;
+        button_menu->view,
+        ButtonMenuModel * model,
+        {
+            size_t item_position = 0;
             ButtonMenuItemArray_it_t it;
             for(ButtonMenuItemArray_it(it, model->items); !ButtonMenuItemArray_end_p(it);
                 ButtonMenuItemArray_next(it), ++item_position) {
@@ -338,6 +402,6 @@ void button_menu_set_selected_item(ButtonMenu* button_menu, uint32_t index) {
                     break;
                 }
             }
-            return true;
-        });
+        },
+        true);
 }

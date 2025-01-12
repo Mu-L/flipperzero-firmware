@@ -28,18 +28,14 @@ uint32_t bt_debug_start_view(void* context) {
     return BtDebugAppViewSubmenu;
 }
 
-BtDebugApp* bt_debug_app_alloc() {
+BtDebugApp* bt_debug_app_alloc(void) {
     BtDebugApp* app = malloc(sizeof(BtDebugApp));
-
-    // Load settings
-    bt_settings_load(&app->settings);
 
     // Gui
     app->gui = furi_record_open(RECORD_GUI);
 
     // View dispatcher
     app->view_dispatcher = view_dispatcher_alloc();
-    view_dispatcher_enable_queue(app->view_dispatcher);
     view_dispatcher_attach_to_gui(app->view_dispatcher, app->gui, ViewDispatcherTypeFullscreen);
 
     // Views
@@ -98,20 +94,22 @@ void bt_debug_app_free(BtDebugApp* app) {
 int32_t bt_debug_app(void* p) {
     UNUSED(p);
     if(!furi_hal_bt_is_testing_supported()) {
-        FURI_LOG_E(TAG, "Incorrect radio stack: radio testing fetures are absent.");
+        FURI_LOG_E(TAG, "Incorrect radio stack: radio testing features are absent.");
         DialogsApp* dialogs = furi_record_open(RECORD_DIALOGS);
         dialog_message_show_storage_error(dialogs, "Incorrect\nRadioStack");
         return 255;
     }
 
     BtDebugApp* app = bt_debug_app_alloc();
+    // Was bt active?
+    const bool was_active = furi_hal_bt_is_active();
     // Stop advertising
     furi_hal_bt_stop_advertising();
 
     view_dispatcher_run(app->view_dispatcher);
 
     // Restart advertising
-    if(app->settings.enabled) {
+    if(was_active) {
         furi_hal_bt_start_advertising();
     }
     bt_debug_app_free(app);

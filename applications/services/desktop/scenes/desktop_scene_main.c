@@ -8,7 +8,6 @@
 #include "../views/desktop_events.h"
 #include "../views/desktop_view_main.h"
 #include "desktop_scene.h"
-#include "desktop_scene_i.h"
 
 #define TAG "DesktopSrv"
 
@@ -34,7 +33,8 @@ static void desktop_scene_main_interact_animation_callback(void* context) {
 }
 
 #ifdef APP_ARCHIVE
-static void desktop_switch_to_app(Desktop* desktop, const FlipperApplication* flipper_app) {
+static void
+    desktop_switch_to_app(Desktop* desktop, const FlipperInternalApplication* flipper_app) {
     furi_assert(desktop);
     furi_assert(flipper_app);
     furi_assert(flipper_app->app);
@@ -45,6 +45,13 @@ static void desktop_switch_to_app(Desktop* desktop, const FlipperApplication* fl
         return;
     }
 
+    FuriHalRtcHeapTrackMode mode = furi_hal_rtc_get_heap_track_mode();
+    if(mode > FuriHalRtcHeapTrackModeNone) {
+        furi_thread_enable_heap_trace(desktop->scene_thread);
+    } else {
+        furi_thread_disable_heap_trace(desktop->scene_thread);
+    }
+
     furi_thread_set_name(desktop->scene_thread, flipper_app->name);
     furi_thread_set_stack_size(desktop->scene_thread, flipper_app->stack_size);
     furi_thread_set_callback(desktop->scene_thread, flipper_app->app);
@@ -53,8 +60,25 @@ static void desktop_switch_to_app(Desktop* desktop, const FlipperApplication* fl
 }
 #endif
 
+static void desktop_scene_main_open_app_or_profile(Desktop* desktop, FavoriteApp* application) {
+    if(strlen(application->name_or_path) > 0) {
+        loader_start_detached_with_gui_error(desktop->loader, application->name_or_path, NULL);
+    } else {
+        loader_start_detached_with_gui_error(desktop->loader, "Passport", NULL);
+    }
+}
+
+static void desktop_scene_main_start_favorite(Desktop* desktop, FavoriteApp* application) {
+    if(strlen(application->name_or_path) > 0) {
+        loader_start_detached_with_gui_error(desktop->loader, application->name_or_path, NULL);
+    } else {
+        loader_start_detached_with_gui_error(desktop->loader, LOADER_APPLICATIONS_NAME, NULL);
+    }
+}
+
 void desktop_scene_main_callback(DesktopEvent event, void* context) {
     Desktop* desktop = (Desktop*)context;
+    if(desktop->in_transition) return;
     view_dispatcher_send_custom_event(desktop->view_dispatcher, event);
 }
 
@@ -81,8 +105,15 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
 
     if(event.type == SceneManagerEventTypeCustom) {
         switch(event.event) {
-        case DesktopMainEventOpenMenu:
-            loader_show_menu();
+        case DesktopMainEventOpenMenu: {
+            Loader* loader = furi_record_open(RECORD_LOADER);
+            loader_show_menu(loader);
+            furi_record_close(RECORD_LOADER);
+            consumed = true;
+        } break;
+
+        case DesktopMainEventLock:
+            desktop_lock(desktop);
             consumed = true;
             break;
 
@@ -104,42 +135,32 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
 
         case DesktopMainEventOpenPowerOff: {
-            LoaderStatus status = loader_start(desktop->loader, "Power", "off");
-            if(status != LoaderStatusOk) {
-                FURI_LOG_E(TAG, "loader_start failed: %d", status);
-            }
+            loader_start_detached_with_gui_error(desktop->loader, "Power", "off");
             consumed = true;
             break;
         }
 
-        case DesktopMainEventOpenFavoritePrimary:
-            DESKTOP_SETTINGS_LOAD(&desktop->settings);
-            if(desktop->settings.favorite_primary < FLIPPER_APPS_COUNT) {
-                LoaderStatus status = loader_start(
-                    desktop->loader, FLIPPER_APPS[desktop->settings.favorite_primary].name, NULL);
-                if(status != LoaderStatusOk) {
-                    FURI_LOG_E(TAG, "loader_start failed: %d", status);
-                }
-            } else {
-                FURI_LOG_E(TAG, "Can't find primary favorite application");
-            }
+        case DesktopMainEventOpenFavoriteLeftShort:
+            desktop_scene_main_start_favorite(
+                desktop, &desktop->settings.favorite_apps[FavoriteAppLeftShort]);
             consumed = true;
             break;
-        case DesktopMainEventOpenFavoriteSecondary:
-            DESKTOP_SETTINGS_LOAD(&desktop->settings);
-            if(desktop->settings.favorite_secondary < FLIPPER_APPS_COUNT) {
-                LoaderStatus status = loader_start(
-                    desktop->loader,
-                    FLIPPER_APPS[desktop->settings.favorite_secondary].name,
-                    NULL);
-                if(status != LoaderStatusOk) {
-                    FURI_LOG_E(TAG, "loader_start failed: %d", status);
-                }
-            } else {
-                FURI_LOG_E(TAG, "Can't find secondary favorite application");
-            }
+        case DesktopMainEventOpenFavoriteLeftLong:
+            desktop_scene_main_start_favorite(
+                desktop, &desktop->settings.favorite_apps[FavoriteAppLeftLong]);
             consumed = true;
             break;
+        case DesktopMainEventOpenFavoriteRightShort:
+            desktop_scene_main_start_favorite(
+                desktop, &desktop->settings.favorite_apps[FavoriteAppRightShort]);
+            consumed = true;
+            break;
+        case DesktopMainEventOpenFavoriteRightLong:
+            desktop_scene_main_start_favorite(
+                desktop, &desktop->settings.favorite_apps[FavoriteAppRightLong]);
+            consumed = true;
+            break;
+
         case DesktopAnimationEventCheckAnimation:
             animation_manager_check_blocking_process(desktop->animation_manager);
             consumed = true;
@@ -150,28 +171,30 @@ bool desktop_scene_main_on_event(void* context, SceneManagerEvent event) {
             break;
         case DesktopAnimationEventInteractAnimation:
             if(!animation_manager_interact_process(desktop->animation_manager)) {
-                LoaderStatus status = loader_start(desktop->loader, "Passport", NULL);
-                if(status != LoaderStatusOk) {
-                    FURI_LOG_E(TAG, "loader_start failed: %d", status);
+                if(!desktop->settings.dummy_mode) {
+                    desktop_scene_main_open_app_or_profile(
+                        desktop, &desktop->settings.favorite_apps[FavoriteAppRightShort]);
+                } else {
+                    desktop_scene_main_open_app_or_profile(
+                        desktop, &desktop->settings.dummy_apps[DummyAppRight]);
                 }
             }
             consumed = true;
             break;
-        case DesktopMainEventOpenPassport: {
-            LoaderStatus status = loader_start(desktop->loader, "Passport", NULL);
-            if(status != LoaderStatusOk) {
-                FURI_LOG_E(TAG, "loader_start failed: %d", status);
-            }
+
+        case DesktopDummyEventOpenLeft:
+            desktop_scene_main_open_app_or_profile(
+                desktop, &desktop->settings.dummy_apps[DummyAppLeft]);
             break;
-        }
-        case DesktopMainEventOpenGameMenu: {
-            LoaderStatus status = loader_start(
-                desktop->loader, "Applications", EXT_PATH("/apps/Games/snake_game.fap"));
-            if(status != LoaderStatusOk) {
-                FURI_LOG_E(TAG, "loader_start failed: %d", status);
-            }
+        case DesktopDummyEventOpenDown:
+            desktop_scene_main_open_app_or_profile(
+                desktop, &desktop->settings.dummy_apps[DummyAppDown]);
             break;
-        }
+        case DesktopDummyEventOpenOk:
+            desktop_scene_main_open_app_or_profile(
+                desktop, &desktop->settings.dummy_apps[DummyAppOk]);
+            break;
+
         case DesktopLockedEventUpdate:
             desktop_view_locked_update(desktop->locked_view);
             consumed = true;

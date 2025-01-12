@@ -1,12 +1,11 @@
 #include "slideshow.h"
 
-#include <stddef.h>
 #include <storage/storage.h>
 #include <gui/icon.h>
 #include <gui/icon_i.h>
 #include <core/dangerous_defines.h>
 
-#define SLIDESHOW_MAGIC 0x72676468
+#define SLIDESHOW_MAGIC                 0x72676468
 #define SLIDESHOW_MAX_SUPPORTED_VERSION 1
 
 struct Slideshow {
@@ -33,7 +32,7 @@ _Static_assert(sizeof(SlideshowFrameHeader) == 2, "Incorrect SlideshowFrameHeade
 
 #pragma pack(pop)
 
-Slideshow* slideshow_alloc() {
+Slideshow* slideshow_alloc(void) {
     Slideshow* ret = malloc(sizeof(Slideshow));
     ret->loaded = false;
     return ret;
@@ -41,7 +40,7 @@ Slideshow* slideshow_alloc() {
 
 void slideshow_free(Slideshow* slideshow) {
     Icon* icon = &slideshow->icon;
-    if(icon) {
+    if(icon) { //-V547
         for(int frame_idx = 0; frame_idx < icon->frame_count; ++frame_idx) {
             uint8_t* frame_data = (uint8_t*)icon->frames[frame_idx];
             free(frame_data);
